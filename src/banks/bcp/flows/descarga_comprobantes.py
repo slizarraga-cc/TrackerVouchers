@@ -5,6 +5,8 @@ Banco: BCP Telecredito (tlcbcp.com)
 Referencias de selectores: manual_componentes.md + Prueba1.md
 """
 
+import os
+import time
 from typing import Optional
 
 from loguru import logger
@@ -18,8 +20,9 @@ from src.core.base_flow import BaseFlow
 
 class DescargaComprobantes(BaseFlow):
 
-    def __init__(self, driver: WebDriver, timeout: int = 15):
+    def __init__(self, driver: WebDriver, timeout: int = 15, downloads_path: str = "/home/seluser/Downloads"):
         super().__init__(driver, timeout)
+        self._downloads_path = downloads_path
 
     def ejecutar(self, fecha_desde: str, fecha_hasta: str, max_pdfs: Optional[int] = None) -> int:
         """
@@ -161,6 +164,38 @@ class DescargaComprobantes(BaseFlow):
             "Verifica que la pagina de bandeja-consulta este completamente cargada."
         )
 
+    def _pdfs_actuales(self) -> set:
+        try:
+            return {f for f in os.listdir(self._downloads_path) if f.lower().endswith('.pdf')}
+        except Exception:
+            return set()
+
+    def _renombrar_pdf_nuevo(self, pdfs_antes: set, indice: int) -> None:
+        """Espera hasta 30s a que aparezca un PDF nuevo y lo renombra a '<indice>.<nombre> BCP.pdf'."""
+        deadline = time.time() + 30
+        nuevo_archivo = None
+        while time.time() < deadline:
+            nuevos = self._pdfs_actuales() - pdfs_antes
+            completos = {f for f in nuevos if not f.endswith('.crdownload')}
+            if completos:
+                nuevo_archivo = next(iter(completos))
+                break
+            time.sleep(0.5)
+
+        if not nuevo_archivo:
+            logger.warning(f"No se detecto PDF nuevo para descarga #{indice}")
+            return
+
+        base = nuevo_archivo[:-4]  # quitar .pdf
+        nombre_destino = f"{indice}.{base} BCP.pdf"
+        ruta_origen  = os.path.join(self._downloads_path, nuevo_archivo)
+        ruta_destino = os.path.join(self._downloads_path, nombre_destino)
+        try:
+            os.rename(ruta_origen, ruta_destino)
+            logger.info(f"PDF renombrado: {nuevo_archivo} → {nombre_destino}")
+        except Exception as e:
+            logger.warning(f"No se pudo renombrar {nuevo_archivo}: {e}")
+
     def _procesar_operaciones(self, max_pdfs: Optional[int]) -> int:
         """
         Itera sobre todas las paginas de la tabla descargando el PDF de cada operacion.
@@ -199,10 +234,12 @@ class DescargaComprobantes(BaseFlow):
                 codigo = fila.get_attribute("index") or f"p{self._pagina_actual}f{i + 1}"
                 logger.info(f"[pag={self._pagina_actual} | fila={i + 1}/{len(filas)}] Operacion {codigo}")
 
+                pdfs_antes = self._pdfs_actuales()
                 try:
                     self._abrir_operacion(fila)
                     if self._descargar_pdf(codigo):
                         descargados += 1
+                        self._renombrar_pdf_nuevo(pdfs_antes, descargados)
                     self._volver_a_lista()
                     self._restaurar_resultados_y_pagina()
                 except Exception as e:
