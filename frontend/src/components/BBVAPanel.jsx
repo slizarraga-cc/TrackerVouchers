@@ -48,10 +48,9 @@ export function BBVAPanel() {
 
   useEffect(() => {
     getConfig().then((cfg) => {
-      const host = window.location.hostname
-      const port = cfg.vnc_ports?.bbva ?? 7902
+      const base = window.location.origin
       setVncUrl(
-        `http://${host}:${port}/vnc.html?autoconnect=1&resize=scale&password=${cfg.vnc_password}`
+        `${base}/vnc/bbva/vnc.html?autoconnect=1&resize=scale&password=${cfg.vnc_password}&path=vnc/bbva/`
       )
     })
 

@@ -52,10 +52,9 @@ export function BCPPanel() {
   // Al montar: cargar VNC URL y reconectar a sesion activa si existe
   useEffect(() => {
     getConfig().then((cfg) => {
-      const host = window.location.hostname
-      const port = cfg.vnc_ports?.bcp ?? 7901
+      const base = window.location.origin
       setVncUrl(
-        `http://${host}:${port}/vnc.html?autoconnect=1&resize=scale&password=${cfg.vnc_password}`
+        `${base}/vnc/bcp/vnc.html?autoconnect=1&resize=scale&password=${cfg.vnc_password}&path=vnc/bcp/`
       )
     })
 
