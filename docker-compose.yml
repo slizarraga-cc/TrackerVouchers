@@ -1,0 +1,81 @@
+services:
+  selenium-bcp:
+    image: selenium/standalone-chrome:latest
+    container_name: rpa_chrome_bcp
+    shm_size: 3gb
+    ports:
+      - "7901:7900"   # noVNC BCP
+    environment:
+      SE_VNC_PASSWORD: ${VNC_PASSWORD:-rpa123}
+      SE_NODE_MAX_SESSIONS: "1"
+      SE_SCREEN_WIDTH: "1920"
+      SE_SCREEN_HEIGHT: "1080"
+      SE_START_XVFB: "true"
+      SE_NODE_SESSION_TIMEOUT: "86400"
+      SE_SESSION_REQUEST_TIMEOUT: "86400"
+    volumes:
+      - downloads:/home/seluser/Downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  selenium-bbva:
+    image: selenium/standalone-chrome:latest
+    container_name: rpa_chrome_bbva
+    shm_size: 3gb
+    ports:
+      - "7902:7900"   # noVNC BBVA
+    environment:
+      SE_VNC_PASSWORD: ${VNC_PASSWORD:-rpa123}
+      SE_NODE_MAX_SESSIONS: "1"
+      SE_SCREEN_WIDTH: "1920"
+      SE_SCREEN_HEIGHT: "1080"
+      SE_START_XVFB: "true"
+      SE_NODE_SESSION_TIMEOUT: "86400"
+      SE_SESSION_REQUEST_TIMEOUT: "86400"
+    volumes:
+      - downloads:/home/seluser/Downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: rpa_api
+    expose:
+      - "8000"
+    env_file: .env
+    environment:
+      SELENIUM_GRID_URL_BCP: http://selenium-bcp:4444
+      SELENIUM_GRID_URL_BBVA: http://selenium-bbva:4444
+    volumes:
+      - downloads:/app/downloads
+    restart: unless-stopped
+    depends_on:
+      selenium-bcp:
+        condition: service_healthy
+      selenium-bbva:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: rpa_frontend
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - api
+
+volumes:
+  downloads:

@@ -1,0 +1,18 @@
+name: BBVA Net Cash
+codigo: bbva
+
+urls:
+  login: https://www.bbvanetcash.pe/
+
+timeouts:
+  pagina: 30
+  elemento: 15
+  descarga: 30
+
+flujos:
+  seguimiento_pagos:
+    espera_ver_detalle: 4      # segundos tras click en Ver Detalle
+    espera_ver_planilla: 4     # segundos tras click en Ver contenido de planilla
+    espera_descarga_pdf: 6     # segundos tras click en Exportar PDF
+    espera_volver_lista: 3     # segundos tras history.go(-5)
+    pasos_historial_atras: 5   # n en history.go(-n) para volver al listado

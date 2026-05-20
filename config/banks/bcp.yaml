@@ -1,0 +1,16 @@
+name: BCP Telecredito
+codigo: bcp
+
+urls:
+  login: https://www.viabcp.com/empresas/cobranzas-y-pagos/telecredito/telecredito-web
+  portal: https://www.tlcbcp.com/#/h/bandeja-consulta
+
+timeouts:
+  pagina: 30      
+  elemento: 15    
+  descarga: 30    
+
+flujos:
+  descarga_comprobantes:
+    max_pdfs_default: 10
+    espera_entre_operaciones: 2  

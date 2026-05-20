@@ -1,0 +1,5 @@
+selenium>=4.20.0
+click>=8.1.7
+python-dotenv>=1.0.1
+PyYAML>=6.0.2
+loguru>=0.7.2

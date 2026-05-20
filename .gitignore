@@ -1,0 +1,52 @@
+# Entorno virtual y direnv
+.direnv/
+.envrc
+
+# Variables de entorno (contienen credenciales)
+.env
+.env.*
+!.env.example
+
+# Descargas (PDFs generados en runtime)
+downloads/*
+!downloads/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker
+*.override.yml
+
+# Claude Code
+.claude/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
