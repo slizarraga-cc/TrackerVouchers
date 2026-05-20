@@ -1,6 +1,7 @@
 import asyncio
 import os
 import threading
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -11,6 +12,7 @@ from api.session_manager import session_manager, SessionStatus, Session
 
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/app/downloads')
 SELENIUM_GRID_URL_BBVA = os.getenv('SELENIUM_GRID_URL_BBVA', 'http://selenium-bbva:4444')
+DEBUG_MODE = os.getenv('DEBUG', 'false').lower() == 'true'
 
 router = APIRouter()
 
@@ -47,6 +49,59 @@ def _renombrar_pdfs_nuevos(pdfs_previos: set) -> None:
         logger.warning(f"No se pudo renombrar PDFs: {e}")
 
 
+LOGS_PATH = os.getenv('LOGS_PATH', '/app/logs')
+
+
+def _capturar_dom_en_error(session: Session) -> None:
+    """
+    Captura el estado del DOM cuando ocurre un error:
+    - Loguea un resumen de los elementos clave en la sesion (visible en el frontend).
+    - Guarda el page source completo en logs/dom_error_BBVA_<timestamp>.html
+      para inspeccion manual.
+    """
+    if not session.driver:
+        return
+    try:
+        url     = session.driver.current_url
+        script  = """
+        function outerOrEmpty(sel) {
+            const el = document.querySelector(sel);
+            return el ? el.outerHTML.slice(0, 2000) : null;
+        }
+        return {
+            url:        document.location.href,
+            title:      document.title,
+            section:    outerOrEmpty('#cells-template-bbva-btge-menurization-landing-solution'),
+            sidebar:    outerOrEmpty('bbva-btge-sidebar-menu'),
+            body_head:  document.body ? document.body.outerHTML.slice(0, 500) : null,
+        };
+        """
+        info = session.driver.execute_script(script)
+        logger.debug(f"[DOM-ERROR] URL: {info.get('url')} | Title: {info.get('title')}")
+
+        if info.get('section'):
+            logger.debug(f"[DOM-ERROR] seccion menurization (primeros 2000 chars):\n{info['section']}")
+        elif info.get('sidebar'):
+            logger.debug(f"[DOM-ERROR] sidebar (primeros 2000 chars):\n{info['sidebar']}")
+        else:
+            logger.debug(f"[DOM-ERROR] body head:\n{info.get('body_head')}")
+
+        # Guardar source completo en archivo para inspeccion
+        try:
+            os.makedirs(LOGS_PATH, exist_ok=True)
+            ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = os.path.join(LOGS_PATH, f"dom_error_BBVA_{ts}.html")
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"<!-- URL: {url} -->\n")
+                f.write(session.driver.page_source)
+            logger.debug(f"[DOM-ERROR] Source completo guardado en: {filepath}")
+        except Exception as save_err:
+            logger.debug(f"[DOM-ERROR] No se pudo guardar el archivo: {save_err}")
+
+    except Exception as dom_err:
+        logger.debug(f"[DOM-ERROR] No se pudo capturar el DOM: {dom_err}")
+
+
 def _run_flow(session: Session, fecha: str, max_pdfs):
     thread_id = threading.current_thread().ident
     with _ts_lock:
@@ -60,6 +115,22 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
         logger.info("Conectando al Selenium Grid...")
         driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BBVA)
         session.driver = driver
+
+        # BBVA Net Cash usa Polymer/Web Components con shadow DOM cerrado por defecto.
+        # Parcheamos attachShadow para forzar mode:'open' en cada nuevo documento,
+        # incluyendo las rutas SPA que instancian bbva-btge-menurization-landing-solution-page.
+        # Sin este parche, el.shadowRoot == null y el traversal JS no puede acceder al menu.
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': """
+                (function() {
+                    const _orig = Element.prototype.attachShadow;
+                    Element.prototype.attachShadow = function(init) {
+                        return _orig.call(this, Object.assign({}, init, {mode: 'open'}));
+                    };
+                })();
+            """
+        })
+        logger.debug("Shadow DOM patch inyectado via CDP (attachShadow -> mode:open)")
 
         logger.info("Navegando a la pagina de login BBVA...")
         driver.get(S.LOGIN_URL)
@@ -98,10 +169,8 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
         session.status = SessionStatus.EJECUTANDO
         logger.info("Login confirmado. Iniciando seguimiento de pagos masivos...")
 
-        flow = SeguimientoPagosMasivos(driver)
+        flow = SeguimientoPagosMasivos(driver, downloads_path=DOWNLOADS_PATH)
         descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
-
-        _renombrar_pdfs_nuevos(pdfs_previos)
 
         session.resultado = descargados
         session.status = SessionStatus.COMPLETADO
@@ -111,15 +180,22 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
         session.status = SessionStatus.ERROR
         session.error = str(e)
         logger.error(f"Error inesperado: {e}")
+        _capturar_dom_en_error(session)
     finally:
         with _ts_lock:
             _thread_sessions.pop(thread_id, None)
         if session.driver:
-            try:
-                session.driver.quit()
-            except Exception:
-                pass
-            session.driver = None
+            if DEBUG_MODE and session.status == SessionStatus.ERROR:
+                logger.warning(
+                    "DEBUG=true — navegador BBVA mantenido abierto para inspeccion. "
+                    "Cerralo manualmente o reinicia el contenedor."
+                )
+            else:
+                try:
+                    session.driver.quit()
+                except Exception:
+                    pass
+                session.driver = None
 
 
 # ---------------------------------------------------------------------------

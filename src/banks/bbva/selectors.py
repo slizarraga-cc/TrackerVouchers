@@ -16,18 +16,48 @@ class BBVASelectors:
     LOGIN_URL = "https://www.bbvanetcash.pe/DFAUTH85/mult/KDPOSolicitarCredenciales_es.html"
 
     # -------------------------------------------------------------------------
-    # Menu principal (Web Component en DOM plano)
-    # El host element es accesible por CSS aunque su interior tenga shadow DOM.
-    # Estabilidad: ALTA (event-name es identificador de negocio)
-    # Ref: PASO 1 — HTML: bbva-web-navigation-menu-item[event-name="event-111V00039"]
+    # Menu principal — dos variantes segun dimension de pantalla
+    #
+    # Modo desktop (sidebar visible):
+    #   El item "Pagos" es el 3er elemento de bbva-web-navigation-menu en el sidebar.
+    #   Estabilidad: MEDIA (posicional, pero unico en el sidebar)
+    #   Ref: PASO 1 desktop — sidebar > bbva-web-navigation-menu-item[3]
+    #
+    # Modo responsive (sidebar oculto):
+    #   El item "Pagos" se identifica por event-name en el DOM plano.
+    #   Estabilidad: ALTA (event-name es identificador de negocio)
+    #   Ref: PASO 1 responsive — bbva-web-navigation-menu-item[event-name="event-111V00039"]
     # -------------------------------------------------------------------------
+    MENU_PAGOS_SIDEBAR = (
+        '//*[@id="app__content"]/bbva-btge-sidebar-menu'
+        '//div/bbva-web-navigation-menu'
+        '/bbva-web-navigation-menu-item[3]'
+        '//bbva-web-navigation-menu-item-action//div'
+    )
     MENU_PAGOS = 'bbva-web-navigation-menu-item[event-name="event-111V00039"]'
 
     # -------------------------------------------------------------------------
-    # Sub-menu dentro de iframe menurization-landing
-    # Estabilidad: ALTA (texto visible)
-    # Ref: PASO 2 — bbva-web-link con texto "Seguimiento de pagos masivos"
+    # Sub-menu — dos variantes segun el modo de menu
+    #
+    # Modo desktop: el link "Seguimiento de pagos masivos" esta en el DOM principal
+    #   dentro del panel de navegacion lateral expandido.
+    #   Estabilidad: BAJA (posicional bbva-web-link[6]), usar como fallback.
+    #   Ref: PASO 2 desktop — cells-template-bbva-btge-menurization-landing > bbva-web-link[6]
+    #
+    # Modo responsive: el sub-menu esta dentro de iframe[src*="menurization-landing"]
+    #   Estabilidad: ALTA (texto visible)
+    #   Ref: PASO 2 responsive — bbva-web-link con texto "Seguimiento de pagos masivos"
     # -------------------------------------------------------------------------
+    # ID corregido: el DOM muestra "cells-template-bbva-btge-menurization-landing-solution"
+    # (sin -home; ese valor esta en el atributo current-isolated-page, no en el id).
+    # cells-template-paper-drawer-panel esta en shadow DOM del componente, por lo que
+    # el XPath no puede alcanzarlo — se usa JS traversal en su lugar.
+    SUBMENU_SEGUIMIENTO_SIDEBAR = (
+        '//*[@id="cells-template-bbva-btge-menurization-landing-solution"]'
+        '//cells-template-paper-drawer-panel'
+        '/div/div/bbva-foundations-grid-default-layout[2]'
+        '/div[5]/div/div/bbva-web-link[6]'
+    )
     IFRAME_MENURIZATION = 'iframe[src*="menurization-landing"]'
     SUBMENU_SEGUIMIENTO_TEXTO = "Seguimiento de pagos masivos"
 

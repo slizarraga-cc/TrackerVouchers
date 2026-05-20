@@ -11,6 +11,9 @@ Estructura de iframes:
           └── #kyop-central-load-area          (contenido activo — IFRAME_CENTRAL)
 """
 
+import os
+import re
+import time
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -37,10 +40,11 @@ class Operacion:
 
 class SeguimientoPagosMasivos(BaseFlow):
 
-    def __init__(self, driver: WebDriver, timeout: int = 15):
+    def __init__(self, driver: WebDriver, timeout: int = 15, downloads_path: str = "/home/seluser/Downloads"):
         super().__init__(driver, timeout)
         self._fecha = ""
         self._ventana_principal = ""
+        self._downloads_path = downloads_path
 
     def ejecutar(self, fecha: str, max_pdfs: Optional[int] = None) -> int:
         """
@@ -68,48 +72,404 @@ class SeguimientoPagosMasivos(BaseFlow):
 
     def _navegar_a_seguimiento(self) -> None:
         """
-        Paso 1: Clic en "Pagos" del menu lateral.
-        Paso 2: Clic en "Seguimiento de pagos masivos" dentro del iframe de menu.
+        Paso 1: Clic en "Pagos" del menu.
+        Paso 2: Clic en "Seguimiento de pagos masivos".
 
-        El menu usa bbva-web-navigation-menu-item (Web Component).
-        El sub-menu usa bbva-web-link dentro de iframe[src*="menurization-landing"].
+        Detecta automaticamente el modo de pantalla via JS (no XPath,
+        que falla con shadow DOM de Web Components):
+        - Desktop (sidebar visible): bbva-btge-sidebar-menu presente en DOM.
+        - Responsive (sidebar oculto): sidebar no encontrado.
         """
         self.driver.switch_to.default_content()
+        self._log_estado_dom()
 
-        # Paso 1: Click en el item de menu "Pagos"
-        # El elemento host es accesible en DOM plano via CSS aunque tenga shadow DOM interno.
-        logger.debug(f"Haciendo clic en menu Pagos: {S.MENU_PAGOS}")
-        if not self.click_js_css(S.MENU_PAGOS):
-            raise RuntimeError(f"No se encontro el menu Pagos. Selector: {S.MENU_PAGOS}")
+        sidebar_en_dom = self.elemento_presente_js('bbva-btge-sidebar-menu')
+
+        if sidebar_en_dom:
+            logger.info("Modo desktop detectado — bbva-btge-sidebar-menu presente en DOM")
+            self._navegar_menu_sidebar()
+        else:
+            logger.info("Modo responsive detectado — bbva-btge-sidebar-menu no encontrado")
+            self._navegar_menu_responsive()
+
+        self.esperar(3)
+        logger.info("Navegado a Seguimiento de pagos masivos")
+
+    def _log_estado_dom(self) -> None:
+        """Registra informacion diagnostica del estado del DOM para debug."""
+        try:
+            url    = self.driver.current_url
+            width  = self.driver.execute_script("return window.innerWidth")
+            height = self.driver.execute_script("return window.innerHeight")
+            sidebar_host   = self.driver.execute_script("return !!document.querySelector('bbva-btge-sidebar-menu')")
+            menu_event     = self.driver.execute_script(
+                "return !!document.querySelector('bbva-web-navigation-menu-item[event-name=\"event-111V00039\"]')"
+            )
+            menu_any_item  = self.driver.execute_script(
+                "return !!document.querySelector('bbva-web-navigation-menu-item')"
+            )
+            nav_menu       = self.driver.execute_script(
+                "return !!document.querySelector('bbva-web-navigation-menu')"
+            )
+            iframe_menu    = self.driver.execute_script(
+                "return !!document.querySelector('iframe[src*=\"menurization-landing\"]')"
+            )
+            logger.debug(f"[DOM] URL: {url}")
+            logger.debug(f"[DOM] Ventana: {width}x{height}px")
+            logger.debug(f"[DOM] bbva-btge-sidebar-menu: {sidebar_host}")
+            logger.debug(f"[DOM] bbva-web-navigation-menu: {nav_menu}")
+            logger.debug(f"[DOM] bbva-web-navigation-menu-item (cualquiera): {menu_any_item}")
+            logger.debug(f"[DOM] bbva-web-navigation-menu-item[event-name='event-111V00039']: {menu_event}")
+            logger.debug(f"[DOM] iframe menurization-landing: {iframe_menu}")
+        except Exception as e:
+            logger.warning(f"[DOM] Error al leer estado diagnostico: {e}")
+
+    def _navegar_menu_sidebar(self) -> None:
+        """
+        Menu lateral visible (resolucion desktop).
+        Los elementos estan dentro del shadow DOM del sidebar —
+        XPath no funciona; se usa JS traversal recursivo.
+
+        El sub-menu se expande dentro del shadow DOM del sidebar (NO en iframe).
+        En responsive el sub-menu aparece en iframe menurization-landing.
+        """
+        # Click en "Pagos": traversal profundo hasta bbva-web-navigation-menu-item-action > div
+        resultado_click = self.click_js_shadow_menu_item("event-111V00039")
+        logger.info(f"Click en menu Pagos resultado: {resultado_click}")
+        if resultado_click == 'not-found':
+            # Fallback: XPath posicional (puede funcionar si shadow root es abierto)
+            logger.debug("event-name no hallado en shadow DOM, intentando XPath posicional")
+            if self.elemento_presente(S.MENU_PAGOS_SIDEBAR, timeout=3):
+                self.click_xpath(S.MENU_PAGOS_SIDEBAR)
+                logger.info("Menu Pagos clickeado via XPath posicional — modo desktop")
+            else:
+                raise RuntimeError(
+                    "No se pudo hacer click en menu Pagos (desktop). "
+                    "Ni shadow DOM traversal ni XPath posicional encontraron el elemento."
+                )
+
+        # Esperar a que la seccion de sub-menu cargue en el DOM.
+        # BBVA carga cells-template-bbva-btge-menurization-landing-solution
+        # de forma asincrona tras el click en Pagos — puede tardar mas de 3 segundos.
+        SECTION_CSS = '#cells-template-bbva-btge-menurization-landing-solution'
+        logger.debug(f"Esperando que aparezca '{SECTION_CSS}' en DOM...")
+        seccion_presente = False
+        for _ in range(20):          # hasta 10 segundos (20 x 0.5s)
+            self.esperar(0.5)
+            if self.elemento_presente_js(SECTION_CSS):
+                seccion_presente = True
+                break
+        logger.debug(f"Seccion menurization en DOM: {seccion_presente}")
+
+        # El componente carga su contenido desde origin= URL de forma asincrona.
+        # bbva-web-link vive en el shadow DOM del componente — hay que buscar desde
+        # document (no desde sec, que tiene cero hijos en light DOM) y esperar
+        # hasta que los links aparezcan (show-spinner puede seguir activo un tiempo).
+        # Esperar a que el contenido de la seccion menurization cargue.
+        # IMPORTANTE: contar desde `sec` (no desde `document`) para no confundir
+        # los bbva-web-link del sidebar con los del sub-menu de Pagos.
+        SECTION_CSS = '#cells-template-bbva-btge-menurization-landing-solution'
+        logger.debug("Esperando que bbva-web-link aparezca dentro de la seccion menurization (hasta 20s)...")
+        links_encontrados = 0
+        for _ in range(40):   # 40 x 0.5s = 20 segundos max
+            self.esperar(0.5)
+            links_encontrados = self.driver.execute_script("""
+                const SECTION_CSS = arguments[0];
+                const sec = document.querySelector(SECTION_CSS);
+                if (!sec) return -1;  // -1 = seccion no presente aun
+
+                function findAll(root, tag) {
+                    let items = Array.from(root.querySelectorAll ? root.querySelectorAll(tag) : []);
+                    const all = root.querySelectorAll ? Array.from(root.querySelectorAll('*')) : [];
+                    for (const el of all) {
+                        if (el.shadowRoot) items = items.concat(findAll(el.shadowRoot, tag));
+                    }
+                    if (root.shadowRoot) items = items.concat(findAll(root.shadowRoot, tag));
+                    return items;
+                }
+
+                return findAll(sec, 'bbva-web-link').length;
+            """, SECTION_CSS)
+            if links_encontrados > 0:
+                break
+        logger.debug(f"bbva-web-link en seccion menurization: {links_encontrados}")
+
+        # Diagnostico completo una vez que tenemos links (o agotamos el tiempo)
+        self._log_seccion_menurization()
+
+        # Intento 1: XPath en DOM principal (funciona si contenido esta en light DOM)
+        if self.elemento_presente(S.SUBMENU_SEGUIMIENTO_SIDEBAR, timeout=3):
+            self.click_xpath(S.SUBMENU_SEGUIMIENTO_SIDEBAR)
+            logger.info("Sub-menu clickeado via XPath DOM principal")
+            return
+
+        # Intento 2: JS — busca por texto en shadow DOM desde document root
+        if self.click_js_shadow_link(S.SUBMENU_SEGUIMIENTO_TEXTO):
+            logger.info("Sub-menu clickeado via shadow DOM link traversal (texto)")
+            return
+
+        # Intento 3: window.frames — el iframe del menu esta dentro del shadow DOM
+        # del componente bbva-btge-menurization-landing-solution-page, por lo que
+        # querySelector no lo ve, pero window.frames si lo expone.
+        if self._click_submenu_en_window_frames():
+            logger.info("Sub-menu clickeado via window.frames (iframe en shadow DOM)")
+            return
+
+        # Intento 4: JS — busca bbva-web-link[5] (6to) desde document root
+        if self._click_bbva_web_link_nth(5):
+            logger.info("Sub-menu clickeado via JS bbva-web-link[5] desde document")
+            return
+
+        # Intento 5: fallback al iframe por CSS selector (responsive)
+        logger.debug("Sub-menu no encontrado, intentando iframe menurization como ultimo recurso")
+        self._click_submenu_en_iframe()
+
+    def _log_seccion_menurization(self) -> None:
+        """Diagnostico de que hay dentro de la seccion menurization tras el click en Pagos."""
+        try:
+            info = self.driver.execute_script("""
+                const SECTION = '#cells-template-bbva-btge-menurization-landing-solution';
+                const sec = document.querySelector(SECTION);
+                if (!sec) return {presente: false};
+
+                function findAll(root, tag) {
+                    let items = Array.from(root.querySelectorAll ? root.querySelectorAll(tag) : []);
+                    const all = root.querySelectorAll ? Array.from(root.querySelectorAll('*')) : [];
+                    for (const el of all) {
+                        if (el.shadowRoot) items = items.concat(findAll(el.shadowRoot, tag));
+                    }
+                    if (root.shadowRoot) items = items.concat(findAll(root.shadowRoot, tag));
+                    return items;
+                }
+
+                function iframesIn(root) {
+                    // Retorna solo elementos iframe, sin mezclar con strings
+                    let result = [];
+                    const list = root.querySelectorAll ? Array.from(root.querySelectorAll('iframe')) : [];
+                    result.push(...list);
+                    const all = root.querySelectorAll ? Array.from(root.querySelectorAll('*')) : [];
+                    for (const el of all) {
+                        if (el.shadowRoot) result.push(...iframesIn(el.shadowRoot));
+                    }
+                    if (root.shadowRoot) result.push(...iframesIn(root.shadowRoot));
+                    return result;
+                }
+
+                const sr = sec.shadowRoot;
+                const links = findAll(sec, 'bbva-web-link');
+                const allLinks = findAll(sec, 'a');
+                const iframeEls = iframesIn(sec);
+
+                // window.frames info
+                const framesInfo = [];
+                for (let i = 0; i < window.frames.length; i++) {
+                    try {
+                        framesInfo.push({i, href: window.frames[i].location.href});
+                    } catch(e) {
+                        framesInfo.push({i, href: '(cross-origin or error)'});
+                    }
+                }
+
+                return {
+                    presente: true,
+                    hasShadowRoot: !!sr,
+                    shadowChildCount: sr ? sr.childElementCount : null,
+                    shadowHTML: sr ? sr.innerHTML.slice(0, 400) : null,
+                    spinner: sec.hasAttribute('show-spinner'),
+                    isPageReady: sec.hasAttribute('is-page-ready'),
+                    bbvaWebLinks: links.length,
+                    aLinks: allLinks.length,
+                    aTextos: allLinks.slice(0, 10).map(l => l.textContent.trim().slice(0, 60)),
+                    iframesEnSec: iframeEls.map(f => f.src || f.getAttribute('src') || '(no-src)'),
+                    windowFrames: framesInfo,
+                };
+            """)
+            logger.debug(f"[Menurization] presente={info.get('presente')}")
+            logger.debug(f"[Menurization] shadowRoot={info.get('hasShadowRoot')} | childCount={info.get('shadowChildCount')}")
+            logger.debug(f"[Menurization] show-spinner={info.get('spinner')} | is-page-ready={info.get('isPageReady')}")
+            logger.debug(f"[Menurization] shadowHTML (400 chars): {info.get('shadowHTML')}")
+            logger.debug(f"[Menurization] iframes dentro de sec: {info.get('iframesEnSec')}")
+            logger.debug(f"[Menurization] bbva-web-link count={info.get('bbvaWebLinks')} | <a> count={info.get('aLinks')}")
+            for i, txt in enumerate(info.get('aTextos', [])):
+                logger.debug(f"[Menurization] <a>[{i}]: '{txt}'")
+            logger.debug(f"[Menurization] window.frames total={len(info.get('windowFrames', []))}")
+            for f in info.get('windowFrames', []):
+                logger.debug(f"[Menurization] frame[{f['i']}]: {f['href']}")
+        except Exception as e:
+            logger.warning(f"[Menurization] Error en diagnostico: {e}")
+
+    def _click_submenu_en_window_frames(self) -> bool:
+        """
+        El iframe del menu de Pagos esta dentro del shadow DOM del componente
+        bbva-btge-menurization-landing-solution-page.
+        window.frames no lo expone (iframes en shadow DOM no aparecen ahi),
+        pero JS puede retornar el elemento iframe como WebElement de Selenium,
+        y driver.switch_to.frame(webElement) si funciona.
+
+        Estrategia:
+        1. JS recorre el shadow DOM de sec y retorna el primer <iframe> que encuentra.
+        2. Selenium hace switch_to.frame con ese WebElement.
+        3. Busca el link por texto dentro del documento del frame.
+        """
+        try:
+            iframe_el = self.driver.execute_script("""
+                function findIframe(root) {
+                    if (root.querySelectorAll) {
+                        const frames = root.querySelectorAll('iframe');
+                        if (frames.length) return frames[0];
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot) {
+                                const f = findIframe(el.shadowRoot);
+                                if (f) return f;
+                            }
+                        }
+                    }
+                    if (root.shadowRoot) {
+                        const f = findIframe(root.shadowRoot);
+                        if (f) return f;
+                    }
+                    return null;
+                }
+                const sec = document.querySelector('#cells-template-bbva-btge-menurization-landing-solution');
+                return sec ? findIframe(sec) : null;
+            """)
+
+            if not iframe_el:
+                logger.debug("[ShadowFrame] No se encontro iframe dentro del shadow DOM de sec")
+                return False
+
+            logger.debug("[ShadowFrame] iframe encontrado via JS — haciendo switch_to.frame")
+            self.driver.switch_to.frame(iframe_el)
+
+            # Esperar a que el contenido del iframe cargue
+            self.esperar(2)
+
+            # Buscar el link por texto (puede estar en shadow DOM dentro del frame tambien)
+            resultado = self.driver.execute_script("""
+                const texto = arguments[0];
+                function buscar(root) {
+                    for (const tag of ['a', 'bbva-web-link', 'li', 'span']) {
+                        for (const el of (root.querySelectorAll ? root.querySelectorAll(tag) : [])) {
+                            if (el.textContent.trim().includes(texto)) {
+                                el.click();
+                                return 'clicked:' + el.tagName + ' | text=' + el.textContent.trim().slice(0, 60);
+                            }
+                        }
+                    }
+                    for (const el of (root.querySelectorAll ? root.querySelectorAll('*') : [])) {
+                        if (el.shadowRoot) {
+                            const r = buscar(el.shadowRoot);
+                            if (r) return r;
+                        }
+                    }
+                    return null;
+                }
+                return buscar(document);
+            """, S.SUBMENU_SEGUIMIENTO_TEXTO)
+
+            logger.debug(f"[ShadowFrame] Resultado click: {resultado}")
+
+            if resultado:
+                return True
+
+            # Si no encontro, loguear todos los links para diagnostico
+            links_en_frame = self.driver.execute_script("""
+                return Array.from(document.querySelectorAll('a, bbva-web-link'))
+                    .map(el => el.textContent.trim().slice(0, 80))
+                    .filter(t => t.length > 0)
+                    .slice(0, 20);
+            """)
+            logger.debug(f"[ShadowFrame] Links en iframe: {links_en_frame}")
+            return False
+
+        except Exception as e:
+            logger.warning(f"[ShadowFrame] Error: {e}")
+            return False
+        finally:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+
+    def _click_bbva_web_link_nth(self, index: int) -> bool:
+        """
+        Hace click en el Nth bbva-web-link (0-indexed) dentro de
+        #cells-template-bbva-btge-menurization-landing-solution,
+        atravesando shadow DOM si es necesario.
+        """
+        script = """
+        const SECTION = '#cells-template-bbva-btge-menurization-landing-solution';
+        const sec = document.querySelector(SECTION);
+        if (!sec) return false;
+
+        function findAll(root, tag) {
+            let items = Array.from(root.querySelectorAll ? root.querySelectorAll(tag) : []);
+            const all = root.querySelectorAll ? Array.from(root.querySelectorAll('*')) : [];
+            for (const el of all) {
+                if (el.shadowRoot) items = items.concat(findAll(el.shadowRoot, tag));
+            }
+            if (root.shadowRoot) items = items.concat(findAll(root.shadowRoot, tag));
+            return items;
+        }
+
+        const links = findAll(sec, 'bbva-web-link');
+        if (links.length <= arguments[0]) return false;
+        links[arguments[0]].click();
+        return true;
+        """
+        return bool(self.driver.execute_script(script, index))
+
+    def _navegar_menu_responsive(self) -> None:
+        """
+        Menu lateral oculto (resolucion responsive).
+        Intento 1: CSS directo (light DOM).
+        Intento 2: shadow DOM traversal.
+        """
+        # Intento 1: CSS directo
+        if self.click_js_css(S.MENU_PAGOS):
+            logger.info("Menu Pagos clickeado via CSS directo — modo responsive")
+        else:
+            # Intento 2: shadow DOM traversal
+            logger.debug("CSS directo fallido, intentando shadow DOM traversal")
+            if self.click_js_shadow_css(S.MENU_PAGOS):
+                logger.info("Menu Pagos clickeado via shadow DOM traversal — modo responsive")
+            else:
+                raise RuntimeError(
+                    f"No se encontro el menu Pagos en ningun modo. "
+                    f"Selector: {S.MENU_PAGOS}"
+                )
         self.esperar(2)
+        self._click_submenu_en_iframe()
 
-        # Paso 2: Click en "Seguimiento de pagos masivos" (dentro del iframe del menu)
-        logger.debug(f"Buscando sub-menu '{S.SUBMENU_SEGUIMIENTO_TEXTO}' en iframe menurization")
+    def _click_submenu_en_iframe(self) -> None:
+        """Busca y hace click en 'Seguimiento de pagos masivos' dentro del iframe menurization."""
+        iframe_presente = self.driver.execute_script(
+            "return !!document.querySelector(arguments[0])", S.IFRAME_MENURIZATION
+        )
+        logger.debug(f"iframe menurization presente en DOM antes de esperar: {iframe_presente}")
         try:
             iframe_menu = WebDriverWait(self.driver, self.timeout).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, S.IFRAME_MENURIZATION))
             )
             self.driver.switch_to.frame(iframe_menu)
 
-            # Intento 1: shadow DOM traversal por texto (si bbva-web-link usa shadow DOM)
+            # Intento 1: shadow DOM traversal por texto
             if self.click_js_shadow(S.SUBMENU_SEGUIMIENTO_TEXTO):
-                logger.info("Sub-menu clickeado via shadow DOM traversal")
+                logger.info("Sub-menu clickeado via shadow DOM traversal (texto) en iframe")
+                return
+
+            # Intento 2: XPath directo en iframe
+            xpath = f'//bbva-web-link[normalize-space(.)="{S.SUBMENU_SEGUIMIENTO_TEXTO}"]'
+            if self.elemento_presente(xpath, timeout=5):
+                self.click_xpath(xpath)
+                logger.info("Sub-menu clickeado via XPath en iframe")
             else:
-                # Intento 2: XPath directo (si el texto es accesible en light DOM)
-                xpath = f'//bbva-web-link[normalize-space(.)="{S.SUBMENU_SEGUIMIENTO_TEXTO}"]'
-                if self.elemento_presente(xpath, timeout=5):
-                    self.click_xpath(xpath)
-                    logger.info("Sub-menu clickeado via XPath")
-                else:
-                    raise RuntimeError(
-                        f"No se encontro '{S.SUBMENU_SEGUIMIENTO_TEXTO}' en el sub-menu. "
-                        "Verifica que el menu Pagos este expandido."
-                    )
+                raise RuntimeError(
+                    f"No se encontro '{S.SUBMENU_SEGUIMIENTO_TEXTO}' en iframe menurization. "
+                    "Verifica que el menu Pagos este expandido."
+                )
         finally:
             self.driver.switch_to.default_content()
-
-        self.esperar(3)
-        logger.info("Navegado a Seguimiento de pagos masivos")
 
     # ------------------------------------------------------------------
     # Formulario de busqueda
@@ -120,19 +480,34 @@ class SeguimientoPagosMasivos(BaseFlow):
         Paso 3: Ingresa la fecha en #fechaEspecifica (input con jQuery datepicker).
         Paso 4: Hace clic en el boton "Aceptar".
 
-        Ambos elementos estan dentro de IFRAME_LEGACY > IFRAME_CENTRAL.
+        Ambos elementos estan dentro del shadow DOM de la SPA > iframe SPEKYOP > iframe central.
+        Se usa JS para setear el valor (evita problemas de interactabilidad con el datepicker)
+        y click_js para el boton (evita problemas de elemento no interactable).
         """
         self._switch_to_iframe_central()
 
-        # Campo fecha (input type=text con clase hasDatepicker)
-        input_fecha = WebDriverWait(self.driver, self.timeout).until(
+        # Esperar a que la pagina cargue completamente (onload dispara mostrarEspecifica)
+        WebDriverWait(self.driver, self.timeout).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, S.INPUT_FECHA))
         )
-        input_fecha.clear()
-        input_fecha.send_keys(fecha)
+        self.esperar(1)  # dar tiempo al onload para mostrar el input
+
+        # Setear fecha via JS (datepicker puede bloquear send_keys)
+        ok = self.driver.execute_script("""
+            var input = document.getElementById('fechaEspecifica');
+            if (!input) return false;
+            input.value = arguments[0];
+            // Disparar change para que jQuery datepicker registre el valor
+            if (window.$ && $(input).data('datepicker')) {
+                $(input).datepicker('setDate', arguments[0]);
+            }
+            return true;
+        """, fecha)
+        logger.debug(f"Fecha seteada via JS: {ok} | valor={fecha}")
+
         self.esperar(0.5)
 
-        # Boton Aceptar
+        # Boton Aceptar — click via JS para evitar element not interactable
         btn_aceptar = WebDriverWait(self.driver, self.timeout).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, S.BTN_ACEPTAR))
         )
@@ -190,6 +565,52 @@ class SeguimientoPagosMasivos(BaseFlow):
     # Loop principal de procesamiento
     # ------------------------------------------------------------------
 
+    def _pdfs_actuales(self) -> set:
+        try:
+            return {f for f in os.listdir(self._downloads_path) if f.lower().endswith('.pdf')}
+        except Exception:
+            return set()
+
+    def _renombrar_pdf_nuevo(self, pdfs_antes: set, op: 'Operacion') -> None:
+        """
+        Espera hasta 30s a que aparezca un PDF nuevo en downloads_path y lo
+        renombra a '<monto> BBVA.pdf'. Si ya existe un archivo con ese nombre
+        agrega el nro_orden para evitar colision.
+        """
+        deadline = time.time() + 30
+        nuevo_archivo = None
+        while time.time() < deadline:
+            nuevos = self._pdfs_actuales() - pdfs_antes
+            # Ignorar archivos temporales de Chrome (.crdownload)
+            completos = {f for f in nuevos if not f.endswith('.crdownload')}
+            if completos:
+                nuevo_archivo = next(iter(completos))
+                break
+            time.sleep(0.5)
+
+        if not nuevo_archivo:
+            logger.warning(f"No se detecto PDF nuevo para orden {op.nro_orden}")
+            return
+
+        monto_safe = re.sub(r'[<>:"/\\|?*\n\r\t]', '', op.procesado).strip()
+        if not monto_safe:
+            monto_safe = op.nro_orden
+
+        nombre_destino = f"{monto_safe} BBVA.pdf"
+        ruta_origen  = os.path.join(self._downloads_path, nuevo_archivo)
+        ruta_destino = os.path.join(self._downloads_path, nombre_destino)
+
+        # Evitar colision si ya existe un archivo con ese monto
+        if os.path.exists(ruta_destino):
+            nombre_destino = f"{monto_safe} {op.nro_orden} BBVA.pdf"
+            ruta_destino = os.path.join(self._downloads_path, nombre_destino)
+
+        try:
+            os.rename(ruta_origen, ruta_destino)
+            logger.info(f"PDF renombrado: {nuevo_archivo} → {nombre_destino}")
+        except Exception as e:
+            logger.warning(f"No se pudo renombrar {nuevo_archivo}: {e}")
+
     def _procesar_todas_las_operaciones(self, max_pdfs: Optional[int]) -> int:
         operaciones = self._leer_operaciones()
         if not operaciones:
@@ -203,8 +624,10 @@ class SeguimientoPagosMasivos(BaseFlow):
             logger.info(
                 f"[{i + 1}/{total}] Orden {op.nro_orden} | {op.moneda} {op.procesado} | Estado: {op.estado}"
             )
+            pdfs_antes = self._pdfs_actuales()
             try:
                 self._descargar_pdf_operacion(op)
+                self._renombrar_pdf_nuevo(pdfs_antes, op)
                 descargados += 1
                 self._volver_a_lista()
             except Exception as e:
@@ -291,10 +714,11 @@ class SeguimientoPagosMasivos(BaseFlow):
         """
         self.driver.switch_to.default_content()
         try:
-            legacy = WebDriverWait(self.driver, self.timeout).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, S.IFRAME_LEGACY))
-            )
-            self.driver.switch_to.frame(legacy)
+            legacy_el = self._find_iframe_in_shadow('SPEKYOP')
+            if not legacy_el:
+                logger.warning("_volver_a_lista: iframe SPEKYOP no encontrado en shadow DOM")
+                return
+            self.driver.switch_to.frame(legacy_el)
 
             self.driver.execute_script("""
                 const central = document.getElementById('kyop-central-load-area');
@@ -333,23 +757,76 @@ class SeguimientoPagosMasivos(BaseFlow):
     # Utilitario: cambio de iframe
     # ------------------------------------------------------------------
 
+    def _find_iframe_in_shadow(self, src_pattern: str, timeout: int = None):
+        """
+        Busca un <iframe> cuyo src contiene `src_pattern` atravesando el shadow DOM.
+        Retorna el WebElement del iframe (para usar en switch_to.frame) o None.
+        Necesario porque en BBVA todos los iframes estan dentro de shadow DOM
+        y document.querySelector no los encuentra.
+        """
+        t = timeout or self.timeout
+        deadline = self.driver.execute_script("return Date.now()") + t * 1000
+        script = """
+            const pattern = arguments[0];
+            function find(root) {
+                if (root.querySelectorAll) {
+                    for (const f of root.querySelectorAll('iframe')) {
+                        if (!pattern || (f.src && f.src.includes(pattern))) return f;
+                    }
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) {
+                            const r = find(el.shadowRoot);
+                            if (r) return r;
+                        }
+                    }
+                }
+                if (root.shadowRoot) {
+                    const r = find(root.shadowRoot);
+                    if (r) return r;
+                }
+                return null;
+            }
+            return find(document);
+        """
+        import time
+        while True:
+            el = self.driver.execute_script(script, src_pattern)
+            if el:
+                return el
+            now = self.driver.execute_script("return Date.now()")
+            if now >= deadline:
+                return None
+            time.sleep(0.5)
+
     def _switch_to_iframe_central(self) -> None:
         """
         Navega al iframe anidado IFRAME_LEGACY > IFRAME_CENTRAL.
-        Siempre parte desde default_content para evitar referencias obsoletas
-        tras navegaciones internas del iframe.
+        Siempre parte desde default_content para evitar referencias obsoletas.
+
+        En BBVA ambos iframes estan dentro de shadow DOM de componentes Web,
+        por lo que no son accesibles via document.querySelector ni WebDriverWait
+        con CSS selector. Se usa JS shadow DOM traversal para obtener el
+        WebElement y luego switch_to.frame(element).
 
         Jerarquia:
           default_content
-            └── iframe[src*="SPEKYOP"]      (IFRAME_LEGACY)
-                  └── #kyop-central-load-area (IFRAME_CENTRAL)
+            └── (shadow DOM) iframe[src*="SPEKYOP"]   (IFRAME_LEGACY)
+                  └── #kyop-central-load-area          (IFRAME_CENTRAL, en light DOM del legacy)
         """
         self.driver.switch_to.default_content()
-        legacy = WebDriverWait(self.driver, self.timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, S.IFRAME_LEGACY))
-        )
-        self.driver.switch_to.frame(legacy)
+
+        legacy_el = self._find_iframe_in_shadow('SPEKYOP')
+        if not legacy_el:
+            raise RuntimeError(
+                "No se encontro el iframe SPEKYOP en shadow DOM. "
+                "Verifica que el modulo Seguimiento de pagos masivos este cargado."
+            )
+        self.driver.switch_to.frame(legacy_el)
+        logger.debug("Cambiado a iframe SPEKYOP (legacy)")
+
+        # #kyop-central-load-area esta en el light DOM del documento SPEKYOP
         central = WebDriverWait(self.driver, self.timeout).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, S.IFRAME_CENTRAL))
         )
         self.driver.switch_to.frame(central)
+        logger.debug("Cambiado a iframe #kyop-central-load-area")

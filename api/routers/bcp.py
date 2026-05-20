@@ -1,6 +1,7 @@
 import asyncio
 import os
 import threading
+from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
@@ -8,18 +9,27 @@ from pydantic import BaseModel
 
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/app/downloads')
 SELENIUM_GRID_URL_BCP = os.getenv('SELENIUM_GRID_URL_BCP', 'http://selenium-bcp:4444')
+LOGS_PATH = os.getenv('LOGS_PATH', '/app/logs')
 
 
 def _renombrar_pdfs_nuevos(pdfs_previos: set, banco: str) -> None:
-    """Renombra los PDFs nuevos agregando el sufijo del banco."""
+    """Renombra los PDFs nuevos agregando indice y sufijo del banco.
+    Resultado: '1.nombre BCP.pdf', '2.nombre BCP.pdf', ...
+    El orden del indice sigue el orden de descarga (fecha de modificacion).
+    """
     try:
         pdfs_actuales = {f for f in os.listdir(DOWNLOADS_PATH) if f.lower().endswith('.pdf')}
         nuevos = pdfs_actuales - pdfs_previos
-        sufijo = f'-{banco}.pdf'
-        for nombre in nuevos:
-            if not nombre.upper().endswith(f'-{banco}.PDF') and not nombre.endswith(sufijo):
+        sufijo = f' {banco}.pdf'
+        # Ordenar por fecha de modificacion para respetar el orden de descarga
+        nuevos_ordenados = sorted(
+            nuevos,
+            key=lambda f: os.path.getmtime(os.path.join(DOWNLOADS_PATH, f))
+        )
+        for i, nombre in enumerate(nuevos_ordenados, start=1):
+            if not nombre.upper().endswith(f' {banco.upper()}.PDF') and not nombre.endswith(sufijo):
                 base = nombre[:-4]  # quitar .pdf
-                nuevo = f"{base}{sufijo}"
+                nuevo = f"{i}.{base}{sufijo}"
                 os.rename(
                     os.path.join(DOWNLOADS_PATH, nombre),
                     os.path.join(DOWNLOADS_PATH, nuevo),
@@ -48,6 +58,60 @@ def _session_sink(message):
 
 # Register the sink once at import time
 logger.add(_session_sink, format="{message}", level="DEBUG")
+
+
+# ---------------------------------------------------------------------------
+# Diagnostico de DOM en error
+# ---------------------------------------------------------------------------
+
+def _capturar_dom_en_error(session: Session, banco: str = 'BCP') -> None:
+    """
+    Captura el estado del DOM cuando ocurre un error:
+    - Loguea un resumen de los elementos clave (visible en el frontend).
+    - Guarda el page source completo en logs/dom_error_<banco>_<timestamp>.html
+      para inspeccion manual.
+    """
+    if not session.driver:
+        return
+    try:
+        url = session.driver.current_url
+        script = """
+        function outerOrEmpty(sel) {
+            const el = document.querySelector(sel);
+            return el ? el.outerHTML.slice(0, 2000) : null;
+        }
+        return {
+            url:     document.location.href,
+            title:   document.title,
+            section: outerOrEmpty('#cells-template-bbva-btge-menurization-landing-solution'),
+            sidebar: outerOrEmpty('bbva-btge-sidebar-menu'),
+            body_head: document.body ? document.body.outerHTML.slice(0, 500) : null,
+        };
+        """
+        info = session.driver.execute_script(script)
+        logger.debug(f"[DOM-ERROR] URL: {info.get('url')} | Title: {info.get('title')}")
+
+        if info.get('section'):
+            logger.debug(f"[DOM-ERROR] seccion menurization (primeros 2000 chars):\n{info['section']}")
+        elif info.get('sidebar'):
+            logger.debug(f"[DOM-ERROR] sidebar (primeros 2000 chars):\n{info['sidebar']}")
+        else:
+            logger.debug(f"[DOM-ERROR] body head:\n{info.get('body_head')}")
+
+        # Guardar source completo en archivo para inspeccion
+        try:
+            os.makedirs(LOGS_PATH, exist_ok=True)
+            ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = os.path.join(LOGS_PATH, f"dom_error_{banco}_{ts}.html")
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"<!-- URL: {url} -->\n")
+                f.write(session.driver.page_source)
+            logger.debug(f"[DOM-ERROR] Source completo guardado en: {filepath}")
+        except Exception as save_err:
+            logger.debug(f"[DOM-ERROR] No se pudo guardar el archivo: {save_err}")
+
+    except Exception as dom_err:
+        logger.debug(f"[DOM-ERROR] No se pudo capturar el DOM: {dom_err}")
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +188,7 @@ def _run_flow(session: Session, fecha_desde: str, fecha_hasta: str, max_pdfs: in
         session.status = SessionStatus.ERROR
         session.error = str(e)
         logger.error(f"Error inesperado: {e}")
+        _capturar_dom_en_error(session, banco='BCP')
     finally:
         with _ts_lock:
             _thread_sessions.pop(thread_id, None)

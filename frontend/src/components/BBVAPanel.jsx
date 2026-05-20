@@ -6,6 +6,25 @@ function todayISO() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Lima' })
 }
 
+/** Retorna el ultimo dia laborable anterior a hoy en timezone Lima (YYYY-MM-DD).
+ *  Lunes → Viernes anterior (retrocede 3 dias)
+ *  Domingo → Viernes anterior (retrocede 2 dias)
+ *  Sabado → Viernes anterior (retrocede 1 dia)
+ *  Cualquier otro dia de semana → dia anterior
+ */
+function ultimoDiaLaborable() {
+  const limaHoy = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Lima' })
+  const [y, m, d] = limaHoy.split('-').map(Number)
+  const ayer = new Date(y, m - 1, d - 1)
+  const dow = ayer.getDay() // 0=Dom, 6=Sab
+  if (dow === 6) ayer.setDate(ayer.getDate() - 1) // Sab → Vie
+  if (dow === 0) ayer.setDate(ayer.getDate() - 2) // Dom → Vie
+  const yy = ayer.getFullYear()
+  const mm = String(ayer.getMonth() + 1).padStart(2, '0')
+  const dd = String(ayer.getDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
 function toDisplayDate(htmlDate) {
   if (!htmlDate) return ''
   const [y, m, d] = htmlDate.split('-')
@@ -31,9 +50,7 @@ const STATUS_COLORS = {
 }
 
 export function BBVAPanel() {
-  const today = todayISO()
-
-  const [fecha,    setFecha]    = useState(today)
+  const [fecha,    setFecha]    = useState(ultimoDiaLaborable)
   const [maxPdfs,  setMaxPdfs]  = useState('')
 
   const [sessionId,      setSessionId]      = useState(null)

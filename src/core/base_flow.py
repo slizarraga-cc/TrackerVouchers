@@ -95,6 +95,35 @@ class BaseFlow(ABC):
             css,
         ))
 
+    def elemento_presente_js(self, css: str) -> bool:
+        """
+        Verifica si un elemento existe en el DOM usando JS querySelector.
+        A diferencia de elemento_presente (XPath), NO falla con shadow DOM hosts.
+        Util para detectar la presencia de Web Components como contenedores.
+        """
+        return bool(self.driver.execute_script(
+            "return !!document.querySelector(arguments[0]);", css
+        ))
+
+    def click_js_shadow_css(self, css: str) -> bool:
+        """
+        Busca un elemento por CSS selector atravesando shadow DOMs abiertos
+        recursivamente y hace click. Retorna True si lo encontro.
+        Necesario cuando el elemento esta dentro del shadow root de un Web Component.
+        """
+        script = """
+        function buscar(root, selector) {
+            const el = root.querySelector(selector);
+            if (el) { el.click(); return true; }
+            for (const node of root.querySelectorAll('*')) {
+                if (node.shadowRoot && buscar(node.shadowRoot, selector)) return true;
+            }
+            return false;
+        }
+        return buscar(document, arguments[0]);
+        """
+        return bool(self.driver.execute_script(script, css))
+
     def click_js_shadow(self, texto: str) -> bool:
         """
         Busca un <button> cuyo textContent contenga `texto` atravesando
@@ -114,6 +143,75 @@ class BaseFlow(ABC):
         return buscar(document, arguments[0]);
         """
         return bool(self.driver.execute_script(script, texto))
+
+    def click_js_shadow_link(self, texto: str) -> bool:
+        """
+        Busca cualquier elemento interactivo (bbva-web-link, a, li)
+        cuyo textContent contenga `texto` (includes, no exact match),
+        atravesando shadow DOMs recursivamente.
+        Mas general que click_js_shadow (que solo busca buttons).
+        Necesario para sub-menus de BBVA que usan bbva-web-link dentro del sidebar.
+        """
+        script = """
+        const TAGS = ['bbva-web-link', 'a', 'li'];
+        function buscar(root, texto) {
+            for (const tag of TAGS) {
+                for (const el of root.querySelectorAll(tag)) {
+                    if (el.textContent.trim().includes(texto)) {
+                        el.click(); return true;
+                    }
+                }
+            }
+            for (const el of root.querySelectorAll('*')) {
+                if (el.shadowRoot && buscar(el.shadowRoot, texto)) return true;
+            }
+            return false;
+        }
+        return buscar(document, arguments[0]);
+        """
+        return bool(self.driver.execute_script(script, texto))
+
+    def click_js_shadow_menu_item(self, event_name: str) -> str:
+        """
+        Hace click en un bbva-web-navigation-menu-item buscando por event-name,
+        atravesando shadow DOMs. Intenta llegar al div interno de
+        bbva-web-navigation-menu-item-action (nivel mas profundo clickeable).
+
+        Retorna una cadena indicando que se clickeo, o 'not-found' si no lo encontro.
+        Util para diagnosticar exactamente donde llego el click.
+        """
+        script = """
+        function findInShadow(root, selector) {
+            const el = root.querySelector(selector);
+            if (el) return el;
+            for (const node of root.querySelectorAll('*')) {
+                if (node.shadowRoot) {
+                    const found = findInShadow(node.shadowRoot, selector);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        const sel = 'bbva-web-navigation-menu-item[event-name="' + arguments[0] + '"]';
+        const item = findInShadow(document, sel);
+        if (!item) return 'not-found';
+
+        if (item.shadowRoot) {
+            const action = item.shadowRoot.querySelector('bbva-web-navigation-menu-item-action');
+            if (action) {
+                if (action.shadowRoot) {
+                    const div = action.shadowRoot.querySelector('div');
+                    if (div) { div.click(); return 'clicked-action-div'; }
+                }
+                action.click();
+                return 'clicked-action';
+            }
+        }
+        item.click();
+        return 'clicked-item-host';
+        """
+        return str(self.driver.execute_script(script, event_name))
 
     def volver_atras(self) -> None:
         self.driver.execute_script("window.history.back();")

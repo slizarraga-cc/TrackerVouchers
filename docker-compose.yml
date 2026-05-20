@@ -13,6 +13,7 @@ services:
       SE_START_XVFB: "true"
       SE_NODE_SESSION_TIMEOUT: "86400"
       SE_SESSION_REQUEST_TIMEOUT: "86400"
+      SE_SCREEN_KEYBOARD_LAYOUT: "latam"   # Teclado latinoamericano — habilita mayusculas via Shift
     volumes:
       - downloads:/home/seluser/Downloads
     restart: unless-stopped
@@ -37,6 +38,7 @@ services:
       SE_START_XVFB: "true"
       SE_NODE_SESSION_TIMEOUT: "86400"
       SE_SESSION_REQUEST_TIMEOUT: "86400"
+      SE_SCREEN_KEYBOARD_LAYOUT: "latam"   # Teclado latinoamericano — habilita mayusculas via Shift
     volumes:
       - downloads:/home/seluser/Downloads
     restart: unless-stopped
