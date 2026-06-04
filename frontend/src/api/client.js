@@ -143,6 +143,17 @@ export function suscribirLogsIBK(sessionId, onLog, onStatus) {
   return es
 }
 
+export async function probarCamaraIBK() {
+  const res = await fetch(`${BASE}/ibk/probar-camara`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
+export async function detenerPruebaCamaraIBK() {
+  const res = await fetch(`${BASE}/ibk/probar-camara`, { method: 'DELETE' })
+  return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // Scotiabank
 // ---------------------------------------------------------------------------

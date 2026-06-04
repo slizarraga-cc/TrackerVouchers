@@ -86,6 +86,32 @@ _CAMERA_INJECT_JS = """
 _thread_sessions: dict[int, Session] = {}
 _ts_lock = threading.Lock()
 
+# Página HTML mínima que llama getUserMedia y muestra el stream — usada para probar el relay
+_TEST_CAMERA_HTML = (
+    "<!DOCTYPE html><html><head><title>Camera Test</title>"
+    "<style>*{margin:0;padding:0;box-sizing:border-box}"
+    "body{background:#0a0a0a;color:#fff;font-family:sans-serif;"
+    "display:flex;flex-direction:column;align-items:center;"
+    "justify-content:center;height:100vh;gap:16px}"
+    "video{width:640px;height:480px;border:3px solid #22c55e;"
+    "border-radius:8px;background:#000}"
+    "#s{font-size:14px;color:#9ca3af}"
+    "#s.ok{color:#22c55e}#s.err{color:#ef4444}</style></head>"
+    "<body><video id='v' autoplay playsinline muted></video>"
+    "<div id='s'>Conectando camara...</div><script>"
+    "navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false})"
+    ".then(s=>{document.getElementById('v').srcObject=s;"
+    "const d=document.getElementById('s');"
+    "d.textContent='Camara activa — relay funcionando correctamente';"
+    "d.className='ok'})"
+    ".catch(e=>{const d=document.getElementById('s');"
+    "d.textContent='Error: '+e.message;d.className='err'});"
+    "</script></body></html>"
+)
+
+_test_lock = threading.Lock()
+_test_state: dict = {"session": None, "driver": None, "stop_relay": None}
+
 
 def _session_sink(message):
     tid = message.record["thread"].id
@@ -319,6 +345,59 @@ def get_status(session_id: str):
         "error":      session.error,
         "log_count":  len(session.logs),
     }
+
+
+@router.post("/probar-camara")
+def probar_camara():
+    """Abre el Chrome IBK con la inyección de cámara y navega a una página de test."""
+    import urllib.parse
+    with _test_lock:
+        if _test_state["driver"] is not None:
+            return {"ok": True, "ya_activo": True}
+        if session_manager.get_activa("ibk"):
+            raise HTTPException(400, "Hay una sesión IBK activa. Cancélala antes de probar la cámara.")
+
+        from src.core.driver import get_driver
+
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_IBK, use_camera=True)
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": _CAMERA_INJECT_JS})
+        driver.get("data:text/html," + urllib.parse.quote(_TEST_CAMERA_HTML))
+
+        test_session = session_manager.crear("ibk_test")
+        test_session.status = SessionStatus.EJECUTANDO
+
+        stop_relay = threading.Event()
+        relay = threading.Thread(
+            target=_relay_camera_frames,
+            args=(test_session, driver, stop_relay),
+            daemon=True,
+        )
+        relay.start()
+
+        _test_state["session"] = test_session
+        _test_state["driver"] = driver
+        _test_state["stop_relay"] = stop_relay
+
+    return {"ok": True, "ya_activo": False}
+
+
+@router.delete("/probar-camara")
+def detener_prueba_camara():
+    """Detiene la sesión de prueba de cámara y cierra el Chrome IBK."""
+    with _test_lock:
+        if _test_state.get("stop_relay"):
+            _test_state["stop_relay"].set()
+        if _test_state.get("session"):
+            _test_state["session"].status = SessionStatus.CANCELADO
+        if _test_state.get("driver"):
+            try:
+                _test_state["driver"].quit()
+            except Exception:
+                pass
+        _test_state["session"] = None
+        _test_state["driver"] = None
+        _test_state["stop_relay"] = None
+    return {"ok": True}
 
 
 @router.get("/{session_id}/logs")

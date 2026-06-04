@@ -24,9 +24,10 @@ async def camera_relay(websocket: WebSocket):
     try:
         while True:
             frame = await websocket.receive_bytes()
-            session = session_manager.get_activa("ibk")
-            if session:
-                session.current_frame = frame
+            for banco in ("ibk", "ibk_test"):
+                session = session_manager.get_activa(banco)
+                if session:
+                    session.current_frame = frame
     except WebSocketDisconnect:
         logger.info("Camera relay: cliente desconectado")
     except Exception as e:

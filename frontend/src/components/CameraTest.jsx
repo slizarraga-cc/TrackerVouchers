@@ -4,6 +4,7 @@
  * Remover este módulo una vez confirmado que la cámara opera en producción.
  */
 import { useState, useRef, useEffect } from 'react'
+import { getConfig, probarCamaraIBK, detenerPruebaCamaraIBK, conectarCameraRelay } from '../api/client'
 
 export function CameraTest() {
   const videoRef  = useRef(null)
@@ -14,6 +15,16 @@ export function CameraTest() {
   const [deviceInfo, setDeviceInfo] = useState(null)
   const [devices,    setDevices]    = useState([])
 
+  // Estado prueba Selenium
+  const [seleniumEstado, setSeleniumEstado] = useState('idle') // idle | iniciando | activo | error
+  const [seleniumError,  setSeleniumError]  = useState(null)
+  const [vncUrl,         setVncUrl]         = useState('')
+  const wsRelayRef    = useRef(null)
+  const relayStream   = useRef(null)
+  const relayCanvas   = useRef(null)
+  const relayVideo    = useRef(null)
+  const relayTimer    = useRef(null)
+
   // Una vez que el video element se monta (estado = 'activa'), adjuntar el stream
   useEffect(() => {
     if (estado === 'activa' && videoRef.current && streamRef.current) {
@@ -23,8 +34,64 @@ export function CameraTest() {
 
   // Limpiar stream al desmontar
   useEffect(() => {
-    return () => detener()
+    return () => { detener(); detenerSelenium() }
   }, [])
+
+  useEffect(() => {
+    getConfig().then((cfg) => {
+      const base = window.location.origin
+      setVncUrl(`${base}/vnc/ibk/vnc.html?autoconnect=1&resize=scale&password=${cfg.vnc_password}&path=vnc/ibk/`)
+    })
+  }, [])
+
+  async function iniciarSelenium() {
+    setSeleniumEstado('iniciando')
+    setSeleniumError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
+      })
+      relayStream.current = stream
+      if (relayVideo.current) relayVideo.current.srcObject = stream
+
+      await probarCamaraIBK()
+
+      const ws = conectarCameraRelay()
+      wsRelayRef.current = ws
+
+      ws.onopen = () => {
+        const canvas = relayCanvas.current
+        const video  = relayVideo.current
+        if (!canvas || !video) return
+        canvas.width = 640; canvas.height = 480
+        const ctx = canvas.getContext('2d')
+        relayTimer.current = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return
+          ctx.drawImage(video, 0, 0, 640, 480)
+          canvas.toBlob((blob) => {
+            if (!blob || ws.readyState !== WebSocket.OPEN) return
+            blob.arrayBuffer().then((buf) => ws.readyState === WebSocket.OPEN && ws.send(buf))
+          }, 'image/jpeg', 0.8)
+        }, Math.round(1000 / 15))
+        setSeleniumEstado('activo')
+      }
+
+      ws.onerror = () => setSeleniumError('Error en WebSocket de relay.')
+    } catch (err) {
+      setSeleniumEstado('error')
+      setSeleniumError(err.message)
+    }
+  }
+
+  async function detenerSelenium() {
+    clearInterval(relayTimer.current); relayTimer.current = null
+    if (wsRelayRef.current) { wsRelayRef.current.close(); wsRelayRef.current = null }
+    if (relayStream.current) { relayStream.current.getTracks().forEach(t => t.stop()); relayStream.current = null }
+    if (relayVideo.current) relayVideo.current.srcObject = null
+    setSeleniumEstado('idle')
+    setSeleniumError(null)
+    try { await detenerPruebaCamaraIBK() } catch (_) {}
+  }
 
   async function iniciar() {
     setEstado('solicitando')
@@ -252,6 +319,68 @@ export function CameraTest() {
           </div>
         </div>
       )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Prueba end-to-end en Selenium IBK                                  */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="card" style={{ marginTop: '16px' }}>
+        <div className="card-header">
+          <div className="card-header-row">
+            <div>
+              <div className="card-title">Prueba en Selenium IBK</div>
+              <div className="card-subtitle">
+                Abre el Chrome remoto con la inyección activa y muestra tu cámara en él
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Canvas oculto para capturar frames */}
+          <canvas ref={relayCanvas} style={{ display: 'none' }} />
+          {/* Video oculto (fuente del relay) */}
+          <video ref={relayVideo} autoPlay playsInline muted style={{ display: 'none' }} />
+
+          {seleniumEstado === 'idle' && (
+            <button className="btn-primary" onClick={iniciarSelenium} disabled={!isSecure}>
+              <i className="fa-solid fa-flask" />
+              Probar en Selenium IBK
+            </button>
+          )}
+
+          {seleniumEstado === 'iniciando' && (
+            <p style={{ color: 'var(--warn-text)', fontSize: '13px' }}>
+              <i className="fa-solid fa-spinner fa-spin" /> Iniciando Chrome IBK...
+            </p>
+          )}
+
+          {seleniumEstado === 'error' && (
+            <>
+              <p className="error-inline"><i className="fa-solid fa-circle-exclamation" />{seleniumError}</p>
+              <button className="btn-outline" onClick={() => setSeleniumEstado('idle')}>Reintentar</button>
+            </>
+          )}
+
+          {seleniumEstado === 'activo' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px' }}>
+                <i className="fa-solid fa-circle" style={{ color: 'var(--success-text)', fontSize: '8px' }} />
+                <span style={{ color: 'var(--success-text)', fontWeight: 600 }}>Relay activo — tu cámara llega al Chrome IBK</span>
+                <button className="btn-ghost danger" onClick={detenerSelenium} style={{ marginLeft: 'auto' }}>
+                  <i className="fa-solid fa-stop" /> Detener
+                </button>
+              </div>
+              {vncUrl && (
+                <iframe
+                  src={vncUrl}
+                  title="Chrome IBK — prueba de cámara"
+                  style={{ width: '100%', height: '520px', border: 'none', borderRadius: '8px', background: '#000' }}
+                  allow="clipboard-read; clipboard-write"
+                />
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Nota sobre el bot IBK */}
       <div className="card" style={{ marginTop: '16px' }}>
