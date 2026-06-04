@@ -59,27 +59,33 @@ _CAMERA_INJECT_JS = """
         });
     }
 
+    // Crear navigator.mediaDevices si no existe (contextos no seguros: data:, http://)
+    if (!navigator.mediaDevices) {
+        try {
+            Object.defineProperty(navigator, 'mediaDevices', {
+                value: {}, writable: true, configurable: true,
+            });
+        } catch(e) {}
+    }
+
     if (navigator.mediaDevices) {
         navigator.mediaDevices.getUserMedia = async function(constraints) {
             if (constraints && constraints.video) return stream;
             throw Object.assign(new Error('No camera'), { name: 'NotFoundError' });
         };
-        const origEnum = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
         navigator.mediaDevices.enumerateDevices = async function() {
-            const devs = await origEnum();
-            if (!devs.some(d => d.kind === 'videoinput')) {
-                devs.push({ deviceId: 'virtual-cam', kind: 'videoinput', label: 'Virtual Camera', groupId: 'virtual-group' });
-            }
-            return devs;
+            return [{ deviceId: 'virtual-cam', kind: 'videoinput', label: 'Virtual Camera', groupId: 'virtual-group' }];
+        };
+        navigator.mediaDevices.getSupportedConstraints = function() {
+            return { width: true, height: true, frameRate: true, facingMode: true };
         };
     }
 
     // API legacy por si IBK usa navigator.getUserMedia
-    if (!navigator.getUserMedia && navigator.mediaDevices) {
-        navigator.getUserMedia = (constraints, success, error) => {
+    navigator.getUserMedia = navigator.webkitGetUserMedia = navigator.mozGetUserMedia =
+        function(constraints, success, error) {
             navigator.mediaDevices.getUserMedia(constraints).then(success).catch(error);
         };
-    }
 })();
 """
 
@@ -99,13 +105,15 @@ _TEST_CAMERA_HTML = (
     "#s.ok{color:#22c55e}#s.err{color:#ef4444}</style></head>"
     "<body><video id='v' autoplay playsinline muted></video>"
     "<div id='s'>Conectando camara...</div><script>"
+    "function showErr(e){var d=document.getElementById('s');d.textContent='Error: '+e;d.className='err';}"
+    "try{"
     "navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false})"
-    ".then(s=>{document.getElementById('v').srcObject=s;"
-    "const d=document.getElementById('s');"
+    ".then(function(s){document.getElementById('v').srcObject=s;"
+    "var d=document.getElementById('s');"
     "d.textContent='Camara activa — relay funcionando correctamente';"
     "d.className='ok'})"
-    ".catch(e=>{const d=document.getElementById('s');"
-    "d.textContent='Error: '+e.message;d.className='err'});"
+    ".catch(function(e){showErr(e.message);});"
+    "}catch(e){showErr(e.message);}"
     "</script></body></html>"
 )
 
@@ -361,7 +369,7 @@ def probar_camara():
 
         driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_IBK, use_camera=True)
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": _CAMERA_INJECT_JS})
-        driver.get("data:text/html," + urllib.parse.quote(_TEST_CAMERA_HTML))
+        driver.get("https://webcammictest.com/es/")
 
         test_session = session_manager.crear("ibk_test")
         test_session.status = SessionStatus.EJECUTANDO
