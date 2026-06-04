@@ -5,8 +5,10 @@ Banco: BCP Telecredito (tlcbcp.com)
 Referencias de selectores: manual_componentes.md + Prueba1.md
 """
 
+import base64
 import os
 import time
+from datetime import datetime
 from typing import Optional
 
 from loguru import logger
@@ -20,9 +22,16 @@ from src.core.base_flow import BaseFlow
 
 class DescargaComprobantes(BaseFlow):
 
-    def __init__(self, driver: WebDriver, timeout: int = 15, downloads_path: str = "/home/seluser/Downloads"):
+    def __init__(
+        self,
+        driver: WebDriver,
+        timeout: int = 15,
+        downloads_path: str = "/home/seluser/Downloads",
+        logs_path: str = "/app/logs",
+    ):
         super().__init__(driver, timeout)
         self._downloads_path = downloads_path
+        self._logs_path = logs_path
 
     def ejecutar(self, fecha_desde: str, fecha_hasta: str, max_pdfs: Optional[int] = None) -> int:
         """
@@ -47,6 +56,10 @@ class DescargaComprobantes(BaseFlow):
 
         self._navegar_a_bandeja()
         self._cerrar_modal_fraude()
+        try:
+            self._seleccionar_estado_procesada()
+        except Exception as e:
+            logger.warning(f"Filtro Estado no aplicado (continuando): {e}")
         self._ingresar_fechas(fecha_desde, fecha_hasta)
         self._ejecutar_busqueda()
 
@@ -164,14 +177,168 @@ class DescargaComprobantes(BaseFlow):
             "Verifica que la pagina de bandeja-consulta este completamente cargada."
         )
 
+    def _seleccionar_estado_procesada(self) -> None:
+        """
+        Selecciona "Procesada" en el filtro Estado de operación.
+        El control es un Web Component (bcp-select-consult-tray).
+
+        Observacion DOM (dom_error_bcp.html):
+          - Las opciones son bcp-select-option-consult-tray, pre-renderizadas en el DOM.
+          - La opcion "Procesada" contiene un <span class="processed"> como indicador visual.
+          - El click JS funciona aunque el dropdown este visualmente cerrado.
+
+        Estrategia 1 — click directo en la opcion con span.processed (sin abrir dropdown)
+        Estrategia 2 — abrir el toggle del dropdown y luego click en la opcion
+        Estrategia 3 — shadow DOM traversal por texto "Procesada"
+        """
+        self.esperar(1)  # esperar que la pagina termine de renderizar el formulario
+
+        try:
+            # Estrategia 1: click directo en la opcion bcp-select-option-consult-tray
+            # que contiene span.processed (indicador visual de "Procesada")
+            ok = self.driver.execute_script("""
+                const options = document.querySelectorAll('bcp-select-option-consult-tray');
+                for (const opt of options) {
+                    if (opt.querySelector('.processed')) {
+                        const item = opt.querySelector('.select-item');
+                        if (item) { item.click(); return 'item-click'; }
+                        opt.click();
+                        return 'opt-click';
+                    }
+                }
+                return null;
+            """)
+            if ok:
+                logger.info(f"Estado 'Procesada' seleccionado (span.processed → {ok})")
+                self.esperar(1)
+                return
+        except Exception as e:
+            logger.debug(f"Estrategia 1 (span.processed) falló: {e}")
+
+        try:
+            # Estrategia 2: abrir el dropdown-toggle del select que contiene .processed,
+            # luego hacer click en la opcion
+            abierto = self.driver.execute_script("""
+                const options = document.querySelectorAll('bcp-select-option-consult-tray');
+                for (const opt of options) {
+                    if (opt.querySelector('.processed')) {
+                        // Subir al bcp-select-consult-tray padre y abrir su toggle
+                        const select = opt.closest('bcp-select-consult-tray');
+                        if (select) {
+                            const toggle = select.querySelector('.bcp-ffw-dropdown-toggle');
+                            if (toggle) { toggle.click(); return true; }
+                        }
+                        return null;
+                    }
+                }
+                return null;
+            """)
+            if abierto:
+                self.esperar(1)
+                # Ahora intentar click en la opcion Procesada por XPath
+                for xpath_opt in [S.OPCION_PROCESADA, '//span[contains(@class,"processed")]']:
+                    if self.elemento_presente(xpath_opt, timeout=2):
+                        self.click_xpath(xpath_opt)
+                        logger.info("Estado 'Procesada' seleccionado (dropdown toggle + click)")
+                        self.esperar(1)
+                        return
+        except Exception as e:
+            logger.debug(f"Estrategia 2 (dropdown toggle) falló: {e}")
+
+        try:
+            # Estrategia 3: shadow DOM traversal por texto "Procesada"
+            if self.click_js_shadow("Procesada"):
+                logger.info("Estado 'Procesada' seleccionado (shadow DOM)")
+                self.esperar(1)
+                return
+        except Exception as e:
+            logger.debug(f"Estrategia 3 (shadow DOM) falló: {e}")
+
+        logger.warning(
+            "No se pudo seleccionar 'Procesada' automáticamente. "
+            "Continuando con el estado por defecto del formulario."
+        )
+
+    def _extraer_monto(self, codigo: str) -> tuple:
+        """
+        Lee el tipo de operación del detalle abierto y extrae el monto
+        según el campo correspondiente al tipo detectado.
+
+        Retorna (monto, tipo_operacion):
+          - monto: cadena con el valor (ej: "S/ 27,638.20"), o "" si no se pudo extraer.
+          - tipo_operacion: texto del campo "Tipo de operación" del detalle.
+
+        Mapa tipo → (seccion, campo) en MONTO_POR_TIPO de selectors.py.
+        """
+        # Leer tipo de operación
+        tipo = ""
+        try:
+            el_tipo = self.esperar_elemento(S.TIPO_OPERACION_VALOR, timeout=5)
+            tipo = el_tipo.text.strip()
+            logger.debug(f"[{codigo}] Tipo de operación detectado: '{tipo}'")
+        except Exception as e:
+            logger.warning(f"[{codigo}] No se pudo leer tipo de operación: {e}")
+            return "", ""
+
+        # Buscar el XPath correspondiente al tipo de operacion
+        tipo_lower = tipo.lower()
+        xpath_monto = None
+        for clave, xpath in S.MONTO_POR_TIPO.items():
+            if clave in tipo_lower:
+                xpath_monto = xpath
+                break
+
+        if not xpath_monto:
+            logger.warning(f"[{codigo}] Tipo '{tipo}' no tiene mapeo de monto definido")
+            return "", tipo
+
+        # Extraer el valor del monto usando el XPath especifico del tipo
+        try:
+            el_monto = self.esperar_elemento(xpath_monto, timeout=5)
+            monto = el_monto.text.strip()
+            logger.info(f"[{codigo}] Monto extraído (tipo='{tipo}'): {monto}")
+            return monto, tipo
+        except Exception as e:
+            logger.warning(f"[{codigo}] No se pudo leer monto para tipo '{tipo}': {e}")
+            return "", tipo
+
+    def _capturar_dom_monto_no_encontrado(self, codigo: str) -> None:
+        """
+        Guarda el DOM completo del detalle cuando no se puede extraer el monto.
+        Util para analizar nuevos tipos de operacion o campos desconocidos.
+        Archivo: <logs_path>/dom_monto_<codigo>_<timestamp>.html
+        """
+        try:
+            os.makedirs(self._logs_path, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"dom_monto_{codigo}_{ts}.html"
+            filepath = os.path.join(self._logs_path, filename)
+            url = self.driver.current_url
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(f"<!-- URL: {url} | Operacion: {codigo} -->\n")
+                f.write(self.driver.page_source)
+            logger.info(f"[{codigo}] DOM capturado en: {filename}")
+        except Exception as e:
+            logger.warning(f"[{codigo}] No se pudo capturar DOM: {e}")
+
     def _pdfs_actuales(self) -> set:
         try:
             return {f for f in os.listdir(self._downloads_path) if f.lower().endswith('.pdf')}
         except Exception:
             return set()
 
-    def _renombrar_pdf_nuevo(self, pdfs_antes: set, indice: int) -> None:
-        """Espera hasta 30s a que aparezca un PDF nuevo y lo renombra a '<indice>.<nombre> BCP.pdf'."""
+    def _renombrar_pdf_nuevo(self, pdfs_antes: set, monto: str, indice: int) -> None:
+        """
+        Espera hasta 30s a que aparezca un PDF nuevo y lo renombra.
+
+        Formato: '<monto_limpio> BCP.pdf'
+          - monto_limpio: solo digitos, comas y puntos (sin simbolos de moneda).
+            Ejemplo: 'S/ 27,638.20' → '27,638.20'  |  '$ 40,000.00' → '40,000.00'
+          - Si monto esta vacio, usa '<indice> BCP.pdf' como fallback.
+
+        Colisiones: si ya existe un archivo con el mismo nombre base, se agrega
+        un contador: '27,638.20 BCP 2.pdf', '27,638.20 BCP 3.pdf', etc.
+        """
         deadline = time.time() + 30
         nuevo_archivo = None
         while time.time() < deadline:
@@ -183,11 +350,24 @@ class DescargaComprobantes(BaseFlow):
             time.sleep(0.5)
 
         if not nuevo_archivo:
-            logger.warning(f"No se detecto PDF nuevo para descarga #{indice}")
+            logger.warning(f"No se detecto PDF nuevo para operacion #{indice}")
             return
 
-        base = nuevo_archivo[:-4]  # quitar .pdf
-        nombre_destino = f"{indice}.{base} BCP.pdf"
+        if monto:
+            # Eliminar simbolos de moneda y espacios; conservar solo digitos, comas y puntos
+            monto_limpio = ''.join(c for c in monto if c.isdigit() or c in '.,')
+            nombre_base = f"{monto_limpio} BCP"
+        else:
+            nombre_base = f"{indice} BCP"
+
+        # Evitar sobreescribir si ya existe un archivo con el mismo nombre
+        nombre_destino = f"{nombre_base}.pdf"
+        if os.path.exists(os.path.join(self._downloads_path, nombre_destino)):
+            contador = 2
+            while os.path.exists(os.path.join(self._downloads_path, f"{nombre_base} {contador}.pdf")):
+                contador += 1
+            nombre_destino = f"{nombre_base} {contador}.pdf"
+
         ruta_origen  = os.path.join(self._downloads_path, nuevo_archivo)
         ruta_destino = os.path.join(self._downloads_path, nombre_destino)
         try:
@@ -237,9 +417,12 @@ class DescargaComprobantes(BaseFlow):
                 pdfs_antes = self._pdfs_actuales()
                 try:
                     self._abrir_operacion(fila)
-                    if self._descargar_pdf(codigo):
+                    monto, tipo_op = self._extraer_monto(codigo)
+                    if not monto:
+                        self._capturar_dom_monto_no_encontrado(codigo)
+                    if self._descargar_pdf(codigo, tipo_op):
                         descargados += 1
-                        self._renombrar_pdf_nuevo(pdfs_antes, descargados)
+                        self._renombrar_pdf_nuevo(pdfs_antes, monto, descargados)
                     self._volver_a_lista()
                     self._restaurar_resultados_y_pagina()
                 except Exception as e:
@@ -332,9 +515,36 @@ class DescargaComprobantes(BaseFlow):
         self.esperar(2)
         logger.debug("Detalle de operacion abierto")
 
-    def _descargar_pdf(self, codigo: str) -> bool:
+    def _descargar_via_print_pdf(self, codigo: str) -> bool:
         """
-        Detecta el tipo de operacion y hace clic en "Descargar PDF".
+        Genera un PDF de la pagina actual usando CDP Page.printToPDF.
+        Usado para operaciones sin boton "Descargar PDF" (ej: CHEQUES).
+
+        El PDF se guarda en downloads_path con nombre temporal cheque_<codigo>.pdf
+        para que _renombrar_pdf_nuevo lo detecte y lo renombre correctamente.
+        """
+        try:
+            result = self.driver.execute_cdp_cmd("Page.printToPDF", {
+                "printBackground": True,
+                "preferCSSPageSize": True,
+            })
+            pdf_bytes = base64.b64decode(result["data"])
+            nombre_temp = f"cheque_{codigo}.pdf"
+            ruta = os.path.join(self._downloads_path, nombre_temp)
+            with open(ruta, "wb") as f:
+                f.write(pdf_bytes)
+            logger.info(f"PDF generado via print/CDP para operacion {codigo}: {nombre_temp}")
+            return True
+        except Exception as e:
+            logger.warning(f"[{codigo}] No se pudo generar PDF via print/CDP: {e}")
+            return False
+
+    def _descargar_pdf(self, codigo: str, tipo_operacion: str = "") -> bool:
+        """
+        Descarga el PDF de la operacion abierta.
+
+        Para CHEQUES (sin boton "Descargar PDF"): usa CDP Page.printToPDF.
+        Para el resto: clic en el boton "Descargar PDF" con estrategias en cascada.
 
         Estrategias en orden:
           1. XPath por tipo conocido (Transfer / FEC / Generico)
@@ -351,6 +561,11 @@ class DescargaComprobantes(BaseFlow):
           - Transferencias: //bcp-button-ntlc-commons-widgets//button[contains(., "Descargar PDF")]
           - FEC:            //fec-button-export-pdf//button[contains(., "Descargar PDF")]
         """
+        # CHEQUES y otros tipos sin boton: usar print via CDP
+        if "cheque" in tipo_operacion.lower():
+            logger.info(f"[{codigo}] Tipo CHEQUES: descargando via print/CDP")
+            return self._descargar_via_print_pdf(codigo)
+
         candidatos = [
             ("Transferencia", S.BTN_DESCARGAR_PDF_TRANSFER),
             ("FEC/Autodesembolso", S.BTN_DESCARGAR_PDF_FEC),
@@ -457,6 +672,10 @@ class DescargaComprobantes(BaseFlow):
         if self._filas_pagina_actual():
             return  # resultados siguen presentes
         logger.warning("Resultados perdidos al volver. Re-ejecutando busqueda.")
+        try:
+            self._seleccionar_estado_procesada()
+        except Exception as e:
+            logger.warning(f"Filtro Estado no aplicado en re-busqueda (continuando): {e}")
         self._ingresar_fechas(self._fecha_desde, self._fecha_hasta)
         self._ejecutar_busqueda()
         if self._pagina_actual > 1:

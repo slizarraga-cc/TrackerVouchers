@@ -4,7 +4,9 @@ from typing import Optional
 
 from loguru import logger
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
@@ -66,10 +68,36 @@ class BaseFlow(ABC):
         return self.driver.execute_script(script, *args)
 
     # ------------------------------------------------------------------
+    # Teclado — gestion de modificadores
+    # ------------------------------------------------------------------
+
+    def liberar_modificadores(self) -> None:
+        """
+        Libera explicitamente Shift, Ctrl y Alt via ActionChains.
+
+        Selenium puede dejar un modificador en estado "presionado" despues de
+        operaciones fallidas o interrumpidas (send_keys con Keys.SHIFT, etc.).
+        Esto provoca que los siguientes send_keys escriban en mayusculas o
+        activen atajos de teclado de forma involuntaria.
+
+        Llamar a este metodo antes de cualquier send_keys critico garantiza
+        un estado limpio del teclado en el WebDriver.
+        """
+        try:
+            ActionChains(self.driver) \
+                .key_up(Keys.SHIFT) \
+                .key_up(Keys.CONTROL) \
+                .key_up(Keys.ALT) \
+                .perform()
+        except Exception as e:
+            logger.debug(f"liberar_modificadores: {e}")
+
+    # ------------------------------------------------------------------
     # Formularios
     # ------------------------------------------------------------------
 
     def rellenar_fecha(self, name: str, valor: str) -> bool:
+        self.liberar_modificadores()
         script = """
         const input = document.querySelector(`input[name="${arguments[0]}"]`);
         if (!input) return false;

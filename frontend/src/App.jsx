@@ -1,16 +1,21 @@
 import { useState } from 'react'
 import { BCPPanel }        from './components/BCPPanel'
 import { BBVAPanel }       from './components/BBVAPanel'
+import { IBKPanel }        from './components/IBKPanel'
+import { ScotiabankPanel } from './components/ScotiabankPanel'
 import { DocumentosPanel } from './components/DocumentosPanel'
+import { CameraTest }      from './components/CameraTest'
 
 const MODULES = [
   // Bancos
   { id: 'bcp',        label: 'BCP',        icon: 'fa-building-columns', section: 'bancos',       component: BCPPanel },
-  { id: 'bbva',       label: 'BBVA',       icon: 'fa-university',       section: 'bancos',       component: BBVAPanel },
-  { id: 'scotiabank', label: 'Scotiabank',  icon: 'fa-credit-card',      section: 'bancos',       component: null },
-  { id: 'interbank',  label: 'Interbank',   icon: 'fa-landmark',         section: 'bancos',       component: null },
+  { id: 'bbva',       label: 'BBVA',       icon: 'fa-building-columns', section: 'bancos',       component: BBVAPanel },
+  { id: 'interbank',  label: 'Interbank',  icon: 'fa-building-columns', section: 'bancos',       component: IBKPanel },
+  { id: 'scotiabank', label: 'Scotiabank', icon: 'fa-building-columns', section: 'bancos',       component: ScotiabankPanel },
   // Herramientas
-  { id: 'documentos', label: 'Documentos',  icon: 'fa-folder-open',      section: 'herramientas', component: DocumentosPanel },
+  { id: 'documentos',  label: 'Documentos',  icon: 'fa-folder-open', section: 'herramientas', component: DocumentosPanel },
+  // TEMPORAL — remover una vez validada la cámara en producción
+  { id: 'camera-test', label: 'Test Cámara', icon: 'fa-video',       section: 'herramientas', component: CameraTest },
 ]
 
 const SECTIONS = [
@@ -19,11 +24,12 @@ const SECTIONS = [
 ]
 
 const TOPBAR_TITLES = {
-  bcp:        'Descarga de Comprobantes — BCP Telecredito',
-  bbva:       'Seguimiento de Pagos Masivos — BBVA Net Cash',
-  scotiabank: 'Descarga de Comprobantes — Scotiabank',
-  interbank:  'Descarga de Comprobantes — Interbank',
-  documentos: 'Documentos Descargados',
+  bcp:           'Descarga de Comprobantes — BCP Telecredito',
+  bbva:          'Seguimiento de Pagos Masivos — BBVA Net Cash',
+  interbank:     'Descarga de Comprobantes — Interbank Empresas',
+  scotiabank:    'Descarga de Comprobantes — Scotiabank Empresas',
+  documentos:    'Documentos Descargados',
+  'camera-test': 'Prueba de Cámara — Temporal',
 }
 
 export default function App() {

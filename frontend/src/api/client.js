@@ -103,6 +103,88 @@ export function suscribirLogsBBVA(sessionId, onLog, onStatus) {
 }
 
 // ---------------------------------------------------------------------------
+// IBK
+// ---------------------------------------------------------------------------
+
+export async function iniciarIBK({ fechaInicio, fechaFin, maxPdfs }) {
+  const res = await fetch(`${BASE}/ibk/iniciar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fecha_inicio: fechaInicio, fecha_fin: fechaFin, max_pdfs: maxPdfs ?? null }),
+  })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
+export async function confirmarLoginIBK(sessionId) {
+  const res = await fetch(`${BASE}/ibk/${sessionId}/confirmar-login`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.detail || 'Error al confirmar login IBK')
+  }
+  return res.json()
+}
+
+export async function cancelarIBK(sessionId) {
+  const res = await fetch(`${BASE}/ibk/${sessionId}/cancelar`, { method: 'POST' })
+  return res.json()
+}
+
+export async function sesionActivaIBK() {
+  const res = await fetch(`${BASE}/ibk/sesion-activa`)
+  return res.json()
+}
+
+export function suscribirLogsIBK(sessionId, onLog, onStatus) {
+  const es = new EventSource(`${BASE}/ibk/${sessionId}/logs`)
+  es.onmessage = (e) => onLog(e.data)
+  es.addEventListener('status', (e) => onStatus(e.data))
+  es.onerror = () => es.close()
+  return es
+}
+
+// ---------------------------------------------------------------------------
+// Scotiabank
+// ---------------------------------------------------------------------------
+
+export async function iniciarScotiabank({ fecha, maxPdfs }) {
+  const res = await fetch(`${BASE}/scotiabank/iniciar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fecha, max_pdfs: maxPdfs ?? null }),
+  })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
+export async function confirmarLoginScotiabank(sessionId) {
+  const res = await fetch(`${BASE}/scotiabank/${sessionId}/confirmar-login`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.detail || 'Error al confirmar login Scotiabank')
+  }
+  return res.json()
+}
+
+export async function cancelarScotiabank(sessionId) {
+  const res = await fetch(`${BASE}/scotiabank/${sessionId}/cancelar`, { method: 'POST' })
+  return res.json()
+}
+
+export async function sesionActivaScotiabank() {
+  const res = await fetch(`${BASE}/scotiabank/sesion-activa`)
+  return res.json()
+}
+
+export function suscribirLogsScotiabank(sessionId, onLog, onStatus) {
+  const es = new EventSource(`${BASE}/scotiabank/${sessionId}/logs`)
+  es.onmessage = (e) => onLog(e.data)
+  es.addEventListener('status', (e) => onStatus(e.data))
+  es.onerror = () => es.close()
+  return es
+}
+
+// ---------------------------------------------------------------------------
 // Documentos
 // ---------------------------------------------------------------------------
 

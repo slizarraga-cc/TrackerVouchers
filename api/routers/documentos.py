@@ -9,13 +9,13 @@ router = APIRouter()
 
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/app/downloads')
 
-BANK_SUFFIXES = ['BCP', 'BBVA', 'SCOTIABANK', 'INTERBANK']
+BANK_SUFFIXES = ['BCP', 'BBVA', 'SCOTIABANK', 'INTERBANK', 'IBK']
 
 
 def _detectar_banco(filename: str) -> str:
     upper = filename.upper()
     for banco in BANK_SUFFIXES:
-        if f'-{banco}.' in upper:
+        if f' {banco}.' in upper or f'-{banco}.' in upper or f' {banco} ' in upper:
             return banco
     return 'OTRO'
 

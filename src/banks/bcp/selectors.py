@@ -81,6 +81,74 @@ class BCPSelectors:
     BTN_VOLVER_GENERIC = '//a[contains(normalize-space(.), "Volver")]'
 
     # -------------------------------------------------------------------------
+    # Filtro Estado de operacion
+    # Estabilidad: MEDIA (Web Component custom; el tag puede cambiar entre versiones)
+    # -------------------------------------------------------------------------
+    # Tag CSS del componente custom que envuelve el select de estado
+    DROPDOWN_ESTADO_TAG = "bcp-select-consult-tray"
+    # CSS del indicador visual de la opcion "Procesada" (span.processed dentro de bcp-select-option-consult-tray)
+    # Confirmado en dom_error_bcp.html: cada opcion tiene un span con clase de estado (.processed, .pending, .rejected)
+    OPCION_PROCESADA_CSS = "bcp-select-option-consult-tray .processed"
+    # XPath de la opcion "Procesada" una vez que el dropdown esta abierto
+    OPCION_PROCESADA = '//span[contains(@class,"processed")]'
+
+    # -------------------------------------------------------------------------
+    # Detalle de operacion — tipo y monto
+    # Estabilidad: ALTA (basado en texto visible del label)
+    # Patron: //div[normalize-space()="<label>"]/following-sibling::div[1]
+    # -------------------------------------------------------------------------
+    TIPO_OPERACION_VALOR = (
+        '//div[normalize-space()="Tipo de operación"]/following-sibling::div[1]'
+    )
+
+    # Mapa: fragmento del tipo de operacion (lowercase) -> XPath del valor del monto.
+    #
+    # Cada tipo puede tener una estructura DOM diferente segun el componente usado.
+    # Los XPaths fueron derivados de inspeccion directa del page_source de cada pagina:
+    #
+    #   - Tipos con estructura div.col-static / div.col.pl-0 (ntlc-commons-widgets):
+    #     El label esta en <p> dentro de div.col-static y el valor en div.col.pl-0.
+    #     Confirmado en: dom_monto_local.html
+    #
+    #   - Tipos con estructura ldd-container (y0daaa / cheques):
+    #     El label esta en ldd-title > p y el valor en ldd-subtitle-container > h3.
+    #     Confirmado en: dom_monto_checke.html
+    #
+    #   - Tipos con estructura div label / div value (transferencias diferidas):
+    #     El label y valor estan en divs hermanos directos.
+    #     Confirmado en: flujos previos funcionales.
+    MONTO_POR_TIPO: dict = {
+        'tipo de cambio': (
+            '//div[normalize-space()="Monto cambiado"]/following-sibling::div[1]'
+        ),
+        'transferencias a cuentas de terceros bcp local': (
+            # Label " Monto " en div.col-static > p; valor en sibling div.col.pl-0 > ... > h3
+            '//div[contains(@class,"col-static")][.//p[normalize-space()="Monto"]]'
+            '/following-sibling::div[contains(@class,"col")]'
+        ),
+        'transferencia a otros bancos locales - diferida': (
+            '//div[normalize-space()="Monto transferido"]/following-sibling::div[1]'
+        ),
+        'pago de servicios': (
+            '//div[normalize-space()="Monto a pagar"]/following-sibling::div[1]'
+        ),
+        'pago masivo a proveedores': (
+            # "Monto" puede existir en multiples secciones; acotado al que sigue a "Datos de la planilla"
+            '//div[normalize-space()="Datos de la planilla"]'
+            '/following::div[normalize-space()="Monto"][1]/following-sibling::div[1]'
+        ),
+        'transferencia a otros bancos del exterior': (
+            '//div[normalize-space()="Monto total"]/following-sibling::div[1]'
+        ),
+        'cheques': (
+            # Label "Monto" en ldd-title > p; valor en ldd-subtitle-container > h3
+            '//p[normalize-space()="Monto"]'
+            '/ancestor::div[contains(@class,"ldd-container")]'
+            '/div[contains(@class,"ldd-subtitle-container")]'
+        ),
+    }
+
+    # -------------------------------------------------------------------------
     # Paginacion
     # Ref: documentacion de flujo — PASO 4
     # Estabilidad: ALTA (aria-label es semantico, no de estilo)

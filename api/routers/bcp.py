@@ -171,7 +171,7 @@ def _run_flow(session: Session, fecha_desde: str, fecha_hasta: str, max_pdfs: in
         session.status = SessionStatus.EJECUTANDO
         logger.info("Login confirmado. Iniciando descarga de comprobantes...")
 
-        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH)
+        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH, logs_path=LOGS_PATH)
         descargados = flow.ejecutar(
             fecha_desde=fecha_desde,
             fecha_hasta=fecha_hasta,

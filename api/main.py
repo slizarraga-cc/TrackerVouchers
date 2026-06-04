@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import bcp, bbva, documentos
+from api.routers import bcp, bbva, ibk, scotiabank, documentos
 
 app = FastAPI(title="Tesoreria RPA", version="1.0.0")
 
@@ -16,6 +16,8 @@ app.add_middleware(
 
 app.include_router(bcp.router,        prefix="/api/bcp",        tags=["BCP"])
 app.include_router(bbva.router,       prefix="/api/bbva",       tags=["BBVA"])
+app.include_router(ibk.router,        prefix="/api/ibk",        tags=["IBK"])
+app.include_router(scotiabank.router, prefix="/api/scotiabank", tags=["Scotiabank"])
 app.include_router(documentos.router, prefix="/api/documentos", tags=["Documentos"])
 
 
@@ -25,8 +27,10 @@ def config():
     return {
         "vnc_password": os.getenv("VNC_PASSWORD", "rpa123"),
         "vnc_ports": {
-            "bcp":  int(os.getenv("VNC_PORT_BCP",  "7901")),
-            "bbva": int(os.getenv("VNC_PORT_BBVA", "7902")),
+            "bcp":        int(os.getenv("VNC_PORT_BCP",        "7901")),
+            "bbva":       int(os.getenv("VNC_PORT_BBVA",       "7902")),
+            "ibk":        int(os.getenv("VNC_PORT_IBK",        "7903")),
+            "scotiabank": int(os.getenv("VNC_PORT_SCOTIABANK", "7904")),
         },
     }
 

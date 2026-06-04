@@ -1,53 +1,59 @@
+x-selenium-common: &selenium-common
+  image: selenium/standalone-chrome:latest
+  shm_size: 3gb
+  environment: &selenium-env
+    SE_VNC_PASSWORD: ${VNC_PASSWORD:-rpa123}
+    SE_NODE_MAX_SESSIONS: "1"
+    SE_SCREEN_WIDTH: "1920"
+    SE_SCREEN_HEIGHT: "1080"
+    SE_START_XVFB: "true"
+    SE_NODE_SESSION_TIMEOUT: "86400"
+    SE_SESSION_REQUEST_TIMEOUT: "86400"
+    SE_SCREEN_KEYBOARD_LAYOUT: "latam"
+    # caps:none desactiva Caps Lock como tecla de bloqueo.
+    # Esto elimina el problema de desincronizacion de estado entre el cliente noVNC
+    # y el servidor X11, que causaba que Caps Lock y Shift se comportaran de forma
+    # impredecible. Para mayusculas usar Shift (funciona siempre en noVNC).
+    SE_SCREEN_KEYBOARD_OPTIONS: "caps:none"
+  volumes:
+    - downloads:/home/seluser/Downloads
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+    start_period: 30s
+
 services:
   selenium-bcp:
-    image: selenium/standalone-chrome:latest
+    <<: *selenium-common
     container_name: rpa_chrome_bcp
-    shm_size: 3gb
     ports:
       - "7901:7900"   # noVNC BCP
-    environment:
-      SE_VNC_PASSWORD: ${VNC_PASSWORD:-rpa123}
-      SE_NODE_MAX_SESSIONS: "1"
-      SE_SCREEN_WIDTH: "1920"
-      SE_SCREEN_HEIGHT: "1080"
-      SE_START_XVFB: "true"
-      SE_NODE_SESSION_TIMEOUT: "86400"
-      SE_SESSION_REQUEST_TIMEOUT: "86400"
-      SE_SCREEN_KEYBOARD_LAYOUT: "latam"   # Teclado latinoamericano — habilita mayusculas via Shift
-    volumes:
-      - downloads:/home/seluser/Downloads
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
 
   selenium-bbva:
-    image: selenium/standalone-chrome:latest
+    <<: *selenium-common
     container_name: rpa_chrome_bbva
-    shm_size: 3gb
     ports:
       - "7902:7900"   # noVNC BBVA
-    environment:
-      SE_VNC_PASSWORD: ${VNC_PASSWORD:-rpa123}
-      SE_NODE_MAX_SESSIONS: "1"
-      SE_SCREEN_WIDTH: "1920"
-      SE_SCREEN_HEIGHT: "1080"
-      SE_START_XVFB: "true"
-      SE_NODE_SESSION_TIMEOUT: "86400"
-      SE_SESSION_REQUEST_TIMEOUT: "86400"
-      SE_SCREEN_KEYBOARD_LAYOUT: "latam"   # Teclado latinoamericano — habilita mayusculas via Shift
-    volumes:
-      - downloads:/home/seluser/Downloads
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
+
+  selenium-ibk:
+    <<: *selenium-common
+    container_name: rpa_chrome_ibk
+    ports:
+      - "7903:7900"   # noVNC IBK
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+      - /dev/video3:/dev/video3
+
+  selenium-scotiabank:
+    <<: *selenium-common
+    container_name: rpa_chrome_scotiabank
+    ports:
+      - "7904:7900"   # noVNC Scotiabank
 
   api:
     build:
@@ -58,8 +64,10 @@ services:
       - "8000"
     env_file: .env
     environment:
-      SELENIUM_GRID_URL_BCP: http://selenium-bcp:4444
-      SELENIUM_GRID_URL_BBVA: http://selenium-bbva:4444
+      SELENIUM_GRID_URL_BCP:        http://selenium-bcp:4444
+      SELENIUM_GRID_URL_BBVA:       http://selenium-bbva:4444
+      SELENIUM_GRID_URL_IBK:        http://selenium-ibk:4444
+      SELENIUM_GRID_URL_SCOTIABANK: http://selenium-scotiabank:4444
     volumes:
       - downloads:/app/downloads
     restart: unless-stopped
@@ -67,6 +75,10 @@ services:
       selenium-bcp:
         condition: service_healthy
       selenium-bbva:
+        condition: service_healthy
+      selenium-ibk:
+        condition: service_healthy
+      selenium-scotiabank:
         condition: service_healthy
 
   frontend:
