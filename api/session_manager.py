@@ -25,6 +25,7 @@ class Session:
     driver: Optional[object] = None
     resultado: Optional[int] = None
     error: Optional[str] = None
+    current_frame: Optional[bytes] = None
 
     def log(self, msg: str) -> None:
         self.logs.append(msg)

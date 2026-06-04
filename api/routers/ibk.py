@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import os
 import threading
+import time
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
@@ -16,6 +18,34 @@ LOGS_PATH             = os.getenv('LOGS_PATH', '/app/logs')
 DEBUG_MODE            = os.getenv('DEBUG', 'false').lower() == 'true'
 
 router = APIRouter()
+
+# JS inyectado en cada nuevo documento del Chrome IBK.
+# Crea un canvas cuyo MediaStream se devuelve en cada llamada a getUserMedia,
+# permitiendo que el Python relay dibuje frames reales del usuario sobre él.
+_CAMERA_INJECT_JS = """
+(function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 480;
+    window.__cameraCtx = canvas.getContext('2d');
+    const stream = canvas.captureStream(15);
+
+    if (navigator.mediaDevices) {
+        navigator.mediaDevices.getUserMedia = async function(constraints) {
+            if (constraints && constraints.video) return stream;
+            throw Object.assign(new Error('No camera'), { name: 'NotFoundError' });
+        };
+        const origEnum = navigator.mediaDevices.enumerateDevices.bind(navigator.mediaDevices);
+        navigator.mediaDevices.enumerateDevices = async function() {
+            const devs = await origEnum();
+            if (!devs.some(d => d.kind === 'videoinput')) {
+                devs.push({ deviceId: 'virtual', kind: 'videoinput', label: 'Virtual Camera', groupId: '' });
+            }
+            return devs;
+        };
+    }
+})();
+"""
 
 _thread_sessions: dict[int, Session] = {}
 _ts_lock = threading.Lock()
@@ -61,10 +91,34 @@ def _capturar_dom_en_error(session: Session) -> None:
         logger.debug(f"[DOM-ERROR] No se pudo capturar el DOM: {dom_err}")
 
 
+def _relay_camera_frames(session: Session, driver, stop_event: threading.Event) -> None:
+    """Hilo que pushea frames del usuario al canvas inyectado en Chrome-IBK via CDP."""
+    while not stop_event.is_set():
+        frame = session.current_frame
+        if frame is not None:
+            frame_b64 = base64.b64encode(frame).decode("ascii")
+            try:
+                driver.execute_cdp_cmd("Runtime.evaluate", {
+                    "expression": (
+                        "if(window.__cameraCtx){"
+                        "const i=new Image();"
+                        "i.onload=()=>window.__cameraCtx.drawImage(i,0,0,640,480);"
+                        f"i.src='data:image/jpeg;base64,{frame_b64}';"
+                        "}"
+                    ),
+                    "awaitPromise": False,
+                })
+            except Exception:
+                pass
+        time.sleep(0.1)  # 10 fps es suficiente para validación biométrica
+
+
 def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
     thread_id = threading.current_thread().ident
     with _ts_lock:
         _thread_sessions[thread_id] = session
+
+    stop_relay = threading.Event()
 
     try:
         from src.core.driver import get_driver
@@ -73,6 +127,20 @@ def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
         logger.info("Conectando al Selenium Grid IBK...")
         driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_IBK, use_camera=True)
         session.driver = driver
+
+        # Inyectar override de getUserMedia en cada nueva página que cargue Chrome
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": _CAMERA_INJECT_JS,
+        })
+        logger.debug("JS de override de cámara inyectado via CDP")
+
+        # Iniciar hilo que pushea frames del usuario al canvas del Chrome remoto
+        relay_thread = threading.Thread(
+            target=_relay_camera_frames,
+            args=(session, driver, stop_relay),
+            daemon=True,
+        )
+        relay_thread.start()
 
         logger.info("Navegando al portal Interbank Empresas...")
         driver.get("https://empresas.interbank.pe")
@@ -102,6 +170,9 @@ def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
             logger.info("Sesion cancelada por el usuario.")
             return
 
+        stop_relay.set()  # La cámara solo se necesita durante el login
+        session.current_frame = None
+
         session.status = SessionStatus.EJECUTANDO
         logger.info("Login confirmado. Iniciando descarga de comprobantes IBK...")
 
@@ -118,6 +189,7 @@ def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
         logger.error(f"Error inesperado: {e}")
         _capturar_dom_en_error(session)
     finally:
+        stop_relay.set()
         with _ts_lock:
             _thread_sessions.pop(thread_id, None)
         if session.driver:
