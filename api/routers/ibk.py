@@ -27,8 +27,37 @@ _CAMERA_INJECT_JS = """
     const canvas = document.createElement('canvas');
     canvas.width = 640;
     canvas.height = 480;
-    window.__cameraCtx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d');
+    // Pre-llenar con negro para que el stream no sea "vacío"
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, 640, 480);
+    window.__cameraCtx = ctx;
     const stream = canvas.captureStream(15);
+
+    // Parchear track para que parezca cámara real
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+        track.getCapabilities = () => ({
+            aspectRatio: { max: 300, min: 0.005 },
+            deviceId: 'virtual-cam',
+            facingMode: ['user'],
+            frameRate: { max: 60, min: 1 },
+            groupId: 'virtual-group',
+            height: { max: 1080, min: 1 },
+            width: { max: 1920, min: 1 },
+            resizeMode: ['none', 'crop-and-scale'],
+        });
+        track.getSettings = () => ({
+            aspectRatio: 1.333,
+            deviceId: 'virtual-cam',
+            facingMode: 'user',
+            frameRate: 15,
+            groupId: 'virtual-group',
+            height: 480,
+            width: 640,
+            resizeMode: 'none',
+        });
+    }
 
     if (navigator.mediaDevices) {
         navigator.mediaDevices.getUserMedia = async function(constraints) {
@@ -39,9 +68,16 @@ _CAMERA_INJECT_JS = """
         navigator.mediaDevices.enumerateDevices = async function() {
             const devs = await origEnum();
             if (!devs.some(d => d.kind === 'videoinput')) {
-                devs.push({ deviceId: 'virtual', kind: 'videoinput', label: 'Virtual Camera', groupId: '' });
+                devs.push({ deviceId: 'virtual-cam', kind: 'videoinput', label: 'Virtual Camera', groupId: 'virtual-group' });
             }
             return devs;
+        };
+    }
+
+    // API legacy por si IBK usa navigator.getUserMedia
+    if (!navigator.getUserMedia && navigator.mediaDevices) {
+        navigator.getUserMedia = (constraints, success, error) => {
+            navigator.mediaDevices.getUserMedia(constraints).then(success).catch(error);
         };
     }
 })();
