@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import bcp, bbva, ibk, scotiabank, documentos
+from api.routers import bcp, bbva, ibk, scotiabank, documentos, camera
 
 app = FastAPI(title="Tesoreria RPA", version="1.0.0")
 
@@ -19,6 +19,7 @@ app.include_router(bbva.router,       prefix="/api/bbva",       tags=["BBVA"])
 app.include_router(ibk.router,        prefix="/api/ibk",        tags=["IBK"])
 app.include_router(scotiabank.router, prefix="/api/scotiabank", tags=["Scotiabank"])
 app.include_router(documentos.router, prefix="/api/documentos", tags=["Documentos"])
+app.include_router(camera.router,    tags=["Camera"])
 
 
 @app.get("/api/config")

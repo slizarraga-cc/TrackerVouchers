@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { iniciarIBK, confirmarLoginIBK, cancelarIBK, suscribirLogsIBK, getConfig, sesionActivaIBK } from '../api/client'
+import { iniciarIBK, confirmarLoginIBK, cancelarIBK, suscribirLogsIBK, getConfig, sesionActivaIBK, conectarCameraRelay } from '../api/client'
 import { LogsPanel } from './LogsPanel'
 
 function hoyLima() {
@@ -56,7 +56,13 @@ export function IBKPanel() {
   const [vncUrl,        setVncUrl]        = useState('')
   const [vncFullscreen, setVncFullscreen] = useState(false)
 
-  const esRef = useRef(null)
+  const esRef       = useRef(null)
+  const wsRef       = useRef(null)
+  const streamRef   = useRef(null)
+  const cameraRef   = useRef(null)
+  const canvasRef   = useRef(null)
+  const frameTimer  = useRef(null)
+  const [cameraError, setCameraError] = useState(null)
 
   useEffect(() => {
     getConfig().then((cfg) => {
@@ -95,6 +101,75 @@ export function IBKPanel() {
     )
     return () => esRef.current?.close()
   }, [sessionId])
+
+  // Iniciar/detener relay de cámara según el estado de la sesión
+  useEffect(() => {
+    if (status === 'esperando_login') {
+      startCameraRelay()
+    } else {
+      stopCameraRelay()
+    }
+    return () => stopCameraRelay()
+  }, [status])
+
+  async function startCameraRelay() {
+    setCameraError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      })
+      streamRef.current = stream
+      if (cameraRef.current) cameraRef.current.srcObject = stream
+
+      const ws = conectarCameraRelay()
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        const canvas = canvasRef.current
+        const video  = cameraRef.current
+        if (!canvas || !video) return
+        canvas.width  = 640
+        canvas.height = 480
+        const ctx = canvas.getContext('2d')
+
+        frameTimer.current = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return
+          ctx.drawImage(video, 0, 0, 640, 480)
+          canvas.toBlob((blob) => {
+            if (!blob || ws.readyState !== WebSocket.OPEN) return
+            blob.arrayBuffer().then((buf) => {
+              if (ws.readyState === WebSocket.OPEN) ws.send(buf)
+            })
+          }, 'image/jpeg', 0.8)
+        }, Math.round(1000 / 15))
+      }
+
+      ws.onerror = () => setCameraError('Error en la conexión WebSocket de cámara.')
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        setCameraError('Permiso de cámara denegado. Permite el acceso en tu navegador.')
+      } else if (err.name === 'NotFoundError') {
+        setCameraError('No se encontró ninguna cámara conectada.')
+      } else {
+        setCameraError(`Error de cámara: ${err.message}`)
+      }
+    }
+  }
+
+  function stopCameraRelay() {
+    clearInterval(frameTimer.current)
+    frameTimer.current = null
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+    }
+    if (cameraRef.current) cameraRef.current.srcObject = null
+  }
 
   const isActive = status && !['completado', 'error', 'cancelado'].includes(status)
   const showVnc  = ['esperando_login', 'ejecutando'].includes(status)
@@ -138,6 +213,7 @@ export function IBKPanel() {
     setLogs([])
     setResultado(null)
     setApiError(null)
+    setCameraError(null)
     setVncFullscreen(false)
   }
 
@@ -256,15 +332,57 @@ export function IBKPanel() {
           <div className="login-prompt-body">
             <ol className="login-steps">
               <li>En el visor de abajo, inicia sesión con tus credenciales de Interbank Empresas.</li>
+              <li>Si IBK solicita verificación por cámara, <strong>tu cámara ya está activa</strong> y siendo retransmitida al navegador del bot.</li>
               <li>Una vez en el portal principal, haz clic en <strong>Confirmar login</strong>.</li>
             </ol>
+
+            {/* Canvas oculto para capturar frames */}
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+            {/* Preview de cámara */}
+            <div style={{ marginTop: '12px' }}>
+              {cameraError ? (
+                <p className="error-inline">
+                  <i className="fa-solid fa-video-slash" />
+                  {cameraError}
+                </p>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '180px',
+                    aspectRatio: '4/3',
+                    background: '#000',
+                    borderRadius: '6px',
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                  }}>
+                    <video
+                      ref={cameraRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  </div>
+                  <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                    <span style={{ color: 'var(--success-text)', fontWeight: 600 }}>
+                      <i className="fa-solid fa-circle" style={{ fontSize: '8px', marginRight: '5px' }} />
+                      Cámara activa
+                    </span>
+                    <br />
+                    Tu cámara está siendo transmitida al navegador remoto de IBK.
+                  </div>
+                </div>
+              )}
+            </div>
+
             {apiError && (
-              <p className="error-inline">
+              <p className="error-inline" style={{ marginTop: '12px' }}>
                 <i className="fa-solid fa-circle-xmark" />
                 {apiError}
               </p>
             )}
-            <div>
+            <div style={{ marginTop: '12px' }}>
               <button className="btn-primary" onClick={handleConfirmarLogin}>
                 <i className="fa-solid fa-circle-check" />
                 Confirmar login

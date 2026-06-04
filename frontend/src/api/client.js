@@ -185,6 +185,20 @@ export function suscribirLogsScotiabank(sessionId, onLog, onStatus) {
 }
 
 // ---------------------------------------------------------------------------
+// Camera relay (IBK)
+// ---------------------------------------------------------------------------
+
+/**
+ * Abre un WebSocket al relay de cámara del servidor.
+ * El servidor recibe frames JPEG y los pipa a /dev/video0 (v4l2loopback)
+ * para que Chrome-IBK los lea como cámara virtual.
+ */
+export function conectarCameraRelay() {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return new WebSocket(`${proto}//${window.location.host}/ws/camera`)
+}
+
+// ---------------------------------------------------------------------------
 // Documentos
 // ---------------------------------------------------------------------------
 

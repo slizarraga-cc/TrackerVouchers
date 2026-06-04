@@ -45,9 +45,6 @@ services:
       - "7903:7900"   # noVNC IBK
     devices:
       - /dev/video0:/dev/video0
-      - /dev/video1:/dev/video1
-      - /dev/video2:/dev/video2
-      - /dev/video3:/dev/video3
 
   selenium-scotiabank:
     <<: *selenium-common
@@ -62,6 +59,8 @@ services:
     container_name: rpa_api
     expose:
       - "8000"
+    devices:
+      - /dev/video0:/dev/video0
     env_file: .env
     environment:
       SELENIUM_GRID_URL_BCP:        http://selenium-bcp:4444
