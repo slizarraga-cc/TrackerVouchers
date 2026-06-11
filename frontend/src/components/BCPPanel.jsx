@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { iniciarBCP, confirmarLoginBCP, cancelarBCP, suscribirLogs, getConfig, sesionActivaBCP } from '../api/client'
+import { iniciarBCP, confirmarLoginBCP, cancelarBCP, capturarDomBCP, suscribirLogs, getConfig, sesionActivaBCP } from '../api/client'
 import { LogsPanel } from './LogsPanel'
 
 /** Fecha de hoy en timezone Lima → "YYYY-MM-DD" (valor para input type=date) */
@@ -40,6 +40,7 @@ const STATUS_LABELS = {
   completado:       'Completado',
   error:            'Error',
   cancelado:        'Cancelado',
+  libre:            'Modo libre — navegador activo',
 }
 
 const STATUS_COLORS = {
@@ -49,6 +50,7 @@ const STATUS_COLORS = {
   completado:      'var(--success-text)',
   error:           'var(--error-text)',
   cancelado:       'var(--text-muted)',
+  libre:           'var(--warn-text)',
 }
 
 export function BCPPanel() {
@@ -56,13 +58,15 @@ export function BCPPanel() {
   const [fechaHasta, setFechaHasta] = useState(todayISO)
   const [maxPdfs,    setMaxPdfs]    = useState('')
 
-  const [sessionId,   setSessionId]   = useState(null)
-  const [status,      setStatus]      = useState(null)
-  const [logs,        setLogs]        = useState([])
-  const [resultado,   setResultado]   = useState(null)
-  const [apiError,    setApiError]    = useState(null)
-  const [vncUrl,      setVncUrl]      = useState('')
+  const [sessionId,    setSessionId]    = useState(null)
+  const [status,       setStatus]       = useState(null)
+  const [logs,         setLogs]         = useState([])
+  const [resultado,    setResultado]    = useState(null)
+  const [apiError,     setApiError]     = useState(null)
+  const [vncUrl,       setVncUrl]       = useState('')
   const [vncFullscreen, setVncFullscreen] = useState(false)
+  const [domCapturado, setDomCapturado] = useState(null)
+  const [capturando,   setCapturando]   = useState(false)
 
   const esRef = useRef(null)
 
@@ -106,7 +110,7 @@ export function BCPPanel() {
   }, [sessionId])
 
   const isActive    = status && !['completado', 'error', 'cancelado'].includes(status)
-  const showVnc     = ['esperando_login', 'ejecutando'].includes(status)
+  const showVnc     = ['esperando_login', 'ejecutando', 'libre'].includes(status)
   const isTerminal  = ['completado', 'error', 'cancelado'].includes(status)
 
   async function handleIniciar(e) {
@@ -141,6 +145,20 @@ export function BCPPanel() {
     reset()
   }
 
+  async function handleCapturarDom() {
+    if (!sessionId) return
+    setCapturando(true)
+    setDomCapturado(null)
+    try {
+      const data = await capturarDomBCP(sessionId)
+      setDomCapturado(data)
+    } catch (err) {
+      setApiError(err.message)
+    } finally {
+      setCapturando(false)
+    }
+  }
+
   function reset() {
     esRef.current?.close()
     setSessionId(null)
@@ -149,6 +167,8 @@ export function BCPPanel() {
     setResultado(null)
     setApiError(null)
     setVncFullscreen(false)
+    setDomCapturado(null)
+    setCapturando(false)
   }
 
   return (
@@ -273,6 +293,47 @@ export function BCPPanel() {
                 Confirmar login
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Modo libre                                                        */}
+      {/* ---------------------------------------------------------------- */}
+      {status === 'libre' && (
+        <div className="login-prompt">
+          <div className="login-prompt-header">
+            <i className="fa-solid fa-triangle-exclamation" />
+            Modo libre — el flujo se detuvo con un error
+          </div>
+          <div className="login-prompt-body">
+            <p style={{ marginBottom: '12px', color: 'var(--text-muted)' }}>
+              El navegador sigue abierto. Navega en el visor, ubícate en la página que quieras
+              inspeccionar y luego captura el DOM para que pueda analizarlo y corregir el flujo.
+            </p>
+            {apiError && (
+              <p className="error-inline" style={{ marginBottom: '12px' }}>
+                <i className="fa-solid fa-circle-xmark" />
+                {apiError}
+              </p>
+            )}
+            {domCapturado && (
+              <p style={{ marginBottom: '12px', color: 'var(--success-text)', fontSize: '13px' }}>
+                <i className="fa-solid fa-circle-check" style={{ marginRight: '6px' }} />
+                DOM guardado: <strong>{domCapturado.filename}</strong>
+                {domCapturado.url && (
+                  <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>({domCapturado.url})</span>
+                )}
+              </p>
+            )}
+            <button
+              className="btn-primary"
+              onClick={handleCapturarDom}
+              disabled={capturando}
+            >
+              <i className="fa-solid fa-code" />
+              {capturando ? 'Capturando...' : 'Capturar DOM'}
+            </button>
           </div>
         </div>
       )}

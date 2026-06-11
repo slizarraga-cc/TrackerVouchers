@@ -43,6 +43,12 @@ export async function cancelarBCP(sessionId) {
   return res.json()
 }
 
+export async function capturarDomBCP(sessionId) {
+  const res = await fetch(`${BASE}/bcp/${sessionId}/capturar-dom`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
 export async function sesionActivaBCP() {
   const res = await fetch(`${BASE}/bcp/sesion-activa`)
   return res.json()
@@ -89,6 +95,12 @@ export async function cancelarBBVA(sessionId) {
   return res.json()
 }
 
+export async function capturarDomBBVA(sessionId) {
+  const res = await fetch(`${BASE}/bbva/${sessionId}/capturar-dom`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
 export async function sesionActivaBBVA() {
   const res = await fetch(`${BASE}/bbva/sesion-activa`)
   return res.json()
@@ -127,6 +139,12 @@ export async function confirmarLoginIBK(sessionId) {
 
 export async function cancelarIBK(sessionId) {
   const res = await fetch(`${BASE}/ibk/${sessionId}/cancelar`, { method: 'POST' })
+  return res.json()
+}
+
+export async function capturarDomIBK(sessionId) {
+  const res = await fetch(`${BASE}/ibk/${sessionId}/capturar-dom`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
   return res.json()
 }
 
@@ -179,6 +197,12 @@ export async function confirmarLoginScotiabank(sessionId) {
 
 export async function cancelarScotiabank(sessionId) {
   const res = await fetch(`${BASE}/scotiabank/${sessionId}/cancelar`, { method: 'POST' })
+  return res.json()
+}
+
+export async function capturarDomScotiabank(sessionId) {
+  const res = await fetch(`${BASE}/scotiabank/${sessionId}/capturar-dom`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
   return res.json()
 }
 

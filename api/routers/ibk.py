@@ -254,26 +254,24 @@ def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
         logger.success(f"Completado: {descargados} archivo(s) descargados.")
 
     except Exception as e:
-        session.status = SessionStatus.ERROR
+        session.status = SessionStatus.LIBRE
         session.error = str(e)
         logger.error(f"Error inesperado: {e}")
+        logger.warning(
+            "Flujo detenido con error. Navegador en MODO LIBRE — "
+            "puedes navegar e inspeccionar el DOM. Usa 'Capturar DOM' para guardar el estado actual."
+        )
         _capturar_dom_en_error(session)
     finally:
         stop_relay.set()
         with _ts_lock:
             _thread_sessions.pop(thread_id, None)
-        if session.driver:
-            if DEBUG_MODE and session.status == SessionStatus.ERROR:
-                logger.warning(
-                    "DEBUG=true — navegador IBK mantenido abierto para inspeccion. "
-                    "Cerralo manualmente o reinicia el contenedor."
-                )
-            else:
-                try:
-                    session.driver.quit()
-                except Exception:
-                    pass
-                session.driver = None
+        if session.driver and session.status != SessionStatus.LIBRE:
+            try:
+                session.driver.quit()
+            except Exception:
+                pass
+            session.driver = None
 
 
 # ---------------------------------------------------------------------------
@@ -337,8 +335,37 @@ def cancelar(session_id: str):
         raise HTTPException(404, "Sesion no encontrada")
     session.cancel_event.set()
     session.login_event.set()
+    if session.status == SessionStatus.LIBRE and session.driver:
+        try:
+            session.driver.quit()
+        except Exception:
+            pass
+        session.driver = None
     session.status = SessionStatus.CANCELADO
     return {"ok": True}
+
+
+@router.post("/{session_id}/capturar-dom")
+def capturar_dom(session_id: str):
+    """Captura el DOM de la página actual del navegador y lo guarda en logs/."""
+    session = session_manager.get(session_id)
+    if not session:
+        raise HTTPException(404, "Sesion no encontrada")
+    if not session.driver:
+        raise HTTPException(400, "No hay navegador activo para capturar DOM")
+    try:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"dom_captura_IBK_{ts}.html"
+        filepath = os.path.join(LOGS_PATH, filename)
+        url = session.driver.current_url
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(f"<!-- URL: {url} -->\n")
+            f.write(session.driver.page_source)
+        logger.info(f"DOM capturado manualmente: {filename}")
+        return {"ok": True, "filename": filename, "url": url}
+    except Exception as e:
+        raise HTTPException(500, f"Error capturando DOM: {e}")
 
 
 @router.get("/{session_id}/status")

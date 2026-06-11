@@ -12,6 +12,7 @@ class SessionStatus(str, Enum):
     COMPLETADO = "completado"
     ERROR = "error"
     CANCELADO = "cancelado"
+    LIBRE = "libre"  # flujo falló pero navegador sigue abierto para inspección manual
 
 
 @dataclass

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { iniciarBBVA, confirmarLoginBBVA, cancelarBBVA, suscribirLogsBBVA, getConfig, sesionActivaBBVA } from '../api/client'
+import { iniciarBBVA, confirmarLoginBBVA, cancelarBBVA, capturarDomBBVA, suscribirLogsBBVA, getConfig, sesionActivaBBVA } from '../api/client'
 import { LogsPanel } from './LogsPanel'
 
 function todayISO() {
@@ -38,6 +38,7 @@ const STATUS_LABELS = {
   completado:       'Completado',
   error:            'Error',
   cancelado:        'Cancelado',
+  libre:            'Modo libre — navegador activo',
 }
 
 const STATUS_COLORS = {
@@ -47,6 +48,7 @@ const STATUS_COLORS = {
   completado:      'var(--success-text)',
   error:           'var(--error-text)',
   cancelado:       'var(--text-muted)',
+  libre:           'var(--warn-text)',
 }
 
 export function BBVAPanel() {
@@ -60,6 +62,8 @@ export function BBVAPanel() {
   const [apiError,       setApiError]       = useState(null)
   const [vncUrl,         setVncUrl]         = useState('')
   const [vncFullscreen,  setVncFullscreen]  = useState(false)
+  const [domCapturado,   setDomCapturado]   = useState(null)
+  const [capturando,     setCapturando]     = useState(false)
 
   const esRef = useRef(null)
 
@@ -102,7 +106,7 @@ export function BBVAPanel() {
   }, [sessionId])
 
   const isActive   = status && !['completado', 'error', 'cancelado'].includes(status)
-  const showVnc    = ['esperando_login', 'ejecutando'].includes(status)
+  const showVnc    = ['esperando_login', 'ejecutando', 'libre'].includes(status)
 
   async function handleIniciar(e) {
     e.preventDefault()
@@ -135,6 +139,20 @@ export function BBVAPanel() {
     reset()
   }
 
+  async function handleCapturarDom() {
+    if (!sessionId) return
+    setCapturando(true)
+    setDomCapturado(null)
+    try {
+      const data = await capturarDomBBVA(sessionId)
+      setDomCapturado(data)
+    } catch (err) {
+      setApiError(err.message)
+    } finally {
+      setCapturando(false)
+    }
+  }
+
   function reset() {
     esRef.current?.close()
     setSessionId(null)
@@ -143,6 +161,8 @@ export function BBVAPanel() {
     setResultado(null)
     setApiError(null)
     setVncFullscreen(false)
+    setDomCapturado(null)
+    setCapturando(false)
   }
 
   return (
@@ -257,6 +277,47 @@ export function BBVAPanel() {
                 Confirmar login
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Modo libre                                                        */}
+      {/* ---------------------------------------------------------------- */}
+      {status === 'libre' && (
+        <div className="login-prompt">
+          <div className="login-prompt-header">
+            <i className="fa-solid fa-triangle-exclamation" />
+            Modo libre — el flujo se detuvo con un error
+          </div>
+          <div className="login-prompt-body">
+            <p style={{ marginBottom: '12px', color: 'var(--text-muted)' }}>
+              El navegador sigue abierto. Navega en el visor, ubícate en la página que quieras
+              inspeccionar y luego captura el DOM para que pueda analizarlo y corregir el flujo.
+            </p>
+            {apiError && (
+              <p className="error-inline" style={{ marginBottom: '12px' }}>
+                <i className="fa-solid fa-circle-xmark" />
+                {apiError}
+              </p>
+            )}
+            {domCapturado && (
+              <p style={{ marginBottom: '12px', color: 'var(--success-text)', fontSize: '13px' }}>
+                <i className="fa-solid fa-circle-check" style={{ marginRight: '6px' }} />
+                DOM guardado: <strong>{domCapturado.filename}</strong>
+                {domCapturado.url && (
+                  <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>({domCapturado.url})</span>
+                )}
+              </p>
+            )}
+            <button
+              className="btn-primary"
+              onClick={handleCapturarDom}
+              disabled={capturando}
+            >
+              <i className="fa-solid fa-code" />
+              {capturando ? 'Capturando...' : 'Capturar DOM'}
+            </button>
           </div>
         </div>
       )}
