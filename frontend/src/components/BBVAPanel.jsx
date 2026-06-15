@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { iniciarBBVA, confirmarLoginBBVA, cancelarBBVA, capturarDomBBVA, suscribirLogsBBVA, getConfig, sesionActivaBBVA } from '../api/client'
+import { iniciarBBVA, confirmarLoginBBVA, cancelarBBVA, capturarDomBBVA, iniciarLibreBBVA, suscribirLogsBBVA, getConfig, sesionActivaBBVA } from '../api/client'
 import { LogsPanel } from './LogsPanel'
 
 function todayISO() {
@@ -134,6 +134,19 @@ export function BBVAPanel() {
     }
   }
 
+  async function handleIniciarLibre() {
+    setApiError(null)
+    setLogs([])
+    setResultado(null)
+    try {
+      const data = await iniciarLibreBBVA()
+      setSessionId(data.session_id)
+      setStatus(data.status)
+    } catch (err) {
+      setApiError(err.message)
+    }
+  }
+
   async function handleCancelar() {
     if (sessionId) await cancelarBBVA(sessionId)
     reset()
@@ -229,6 +242,15 @@ export function BBVAPanel() {
               <button className="btn-primary" type="submit">
                 <i className="fa-solid fa-play" />
                 Iniciar descarga
+              </button>
+              <button
+                className="btn-outline"
+                type="button"
+                onClick={handleIniciarLibre}
+                style={{ marginLeft: '8px' }}
+              >
+                <i className="fa-solid fa-binoculars" />
+                Solo navegar
               </button>
             </form>
           </div>

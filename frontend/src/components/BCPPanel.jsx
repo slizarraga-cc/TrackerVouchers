@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { iniciarBCP, confirmarLoginBCP, cancelarBCP, capturarDomBCP, suscribirLogs, getConfig, sesionActivaBCP } from '../api/client'
+import { iniciarBCP, confirmarLoginBCP, cancelarBCP, capturarDomBCP, iniciarLibreBCP, suscribirLogs, getConfig, sesionActivaBCP } from '../api/client'
 import { LogsPanel } from './LogsPanel'
 
 /** Fecha de hoy en timezone Lima → "YYYY-MM-DD" (valor para input type=date) */
@@ -140,6 +140,19 @@ export function BCPPanel() {
     }
   }
 
+  async function handleIniciarLibre() {
+    setApiError(null)
+    setLogs([])
+    setResultado(null)
+    try {
+      const data = await iniciarLibreBCP()
+      setSessionId(data.session_id)
+      setStatus(data.status)
+    } catch (err) {
+      setApiError(err.message)
+    }
+  }
+
   async function handleCancelar() {
     if (sessionId) await cancelarBCP(sessionId)
     reset()
@@ -245,6 +258,15 @@ export function BCPPanel() {
               <button className="btn-primary" type="submit">
                 <i className="fa-solid fa-play" />
                 Iniciar descarga
+              </button>
+              <button
+                className="btn-outline"
+                type="button"
+                onClick={handleIniciarLibre}
+                style={{ marginLeft: '8px' }}
+              >
+                <i className="fa-solid fa-binoculars" />
+                Solo navegar
               </button>
             </form>
           </div>

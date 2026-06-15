@@ -102,6 +102,52 @@ def _capturar_dom_en_error(session: Session) -> None:
         logger.debug(f"[DOM-ERROR] No se pudo capturar el DOM: {dom_err}")
 
 
+def _run_libre(session: Session):
+    thread_id = threading.current_thread().ident
+    with _ts_lock:
+        _thread_sessions[thread_id] = session
+
+    try:
+        from src.core.driver import get_driver
+        from src.banks.bbva.selectors import BBVASelectors as S
+
+        logger.info("Conectando al Selenium Grid BBVA (modo libre)...")
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BBVA)
+        session.driver = driver
+
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': """
+                (function() {
+                    const _orig = Element.prototype.attachShadow;
+                    Element.prototype.attachShadow = function(init) {
+                        return _orig.call(this, Object.assign({}, init, {mode: 'open'}));
+                    };
+                })();
+            """
+        })
+        logger.debug("Shadow DOM patch inyectado (modo libre)")
+
+        logger.info("Navegando al portal BBVA...")
+        driver.get(S.LOGIN_URL)
+
+        session.status = SessionStatus.LIBRE
+        logger.info("Modo libre activo. Navega libremente e inspecciona el DOM cuando quieras.")
+
+    except Exception as e:
+        session.status = SessionStatus.ERROR
+        session.error = str(e)
+        logger.error(f"Error al iniciar modo libre: {e}")
+    finally:
+        with _ts_lock:
+            _thread_sessions.pop(thread_id, None)
+        if session.driver and session.status != SessionStatus.LIBRE:
+            try:
+                session.driver.quit()
+            except Exception:
+                pass
+            session.driver = None
+
+
 def _run_flow(session: Session, fecha: str, max_pdfs):
     thread_id = threading.current_thread().ident
     with _ts_lock:
@@ -216,6 +262,22 @@ def sesion_activa():
 class IniciarRequest(BaseModel):
     fecha: str              # DD/MM/YYYY
     max_pdfs: int | None = None
+
+
+@router.post("/iniciar-libre")
+def iniciar_libre():
+    """Abre el navegador directamente en modo libre sin ejecutar ningún flujo."""
+    activa = session_manager.get_activa("bbva")
+    if activa:
+        raise HTTPException(
+            400,
+            f"Ya hay una sesion de BBVA en curso ({activa.status}). "
+            "Cancelala antes de iniciar una nueva.",
+        )
+    session = session_manager.crear("bbva")
+    t = threading.Thread(target=_run_libre, args=(session,), daemon=True)
+    t.start()
+    return {"session_id": session.id, "status": session.status.value}
 
 
 @router.post("/iniciar")

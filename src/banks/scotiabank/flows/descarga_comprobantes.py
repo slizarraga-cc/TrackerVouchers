@@ -75,18 +75,22 @@ class DescargaComprobantes(BaseFlow):
         except Exception as e:
             logger.warning(f"[DOM] No se pudo guardar '{nombre}': {e}")
 
-    def ejecutar(self, fecha: str, max_pdfs: Optional[int] = None) -> int:
+    def ejecutar(self, fecha_desde: str, fecha_hasta: str, max_pdfs: Optional[int] = None) -> int:
         """
         Ejecuta el flujo completo.
 
         Args:
-            fecha:    Fecha en formato DD/MM/YYYY.
-            max_pdfs: Limite total de PDFs. None = sin limite.
+            fecha_desde: Fecha inicio en formato DD/MM/YYYY.
+            fecha_hasta: Fecha fin en formato DD/MM/YYYY.
+            max_pdfs:    Limite total de PDFs. None = sin limite.
 
         Returns:
             Cantidad de PDFs guardados exitosamente.
         """
-        logger.info(f"Iniciando DescargaComprobantes Scotiabank | fecha: {fecha} | max: {max_pdfs or 'sin limite'}")
+        logger.info(
+            f"Iniciando DescargaComprobantes Scotiabank | "
+            f"desde: {fecha_desde} hasta: {fecha_hasta} | max: {max_pdfs or 'sin limite'}"
+        )
 
         self._navegar_a_general_saldos()
 
@@ -95,7 +99,7 @@ class DescargaComprobantes(BaseFlow):
             if max_pdfs is not None and total_guardados >= max_pdfs:
                 break
             restante = (max_pdfs - total_guardados) if max_pdfs is not None else None
-            guardados = self._procesar_cuenta(cuenta["numero"], cuenta["moneda"], fecha, restante)
+            guardados = self._procesar_cuenta(cuenta["numero"], cuenta["moneda"], fecha_desde, fecha_hasta, restante)
             total_guardados += guardados
             logger.info(f"Cuenta {cuenta['numero']} ({cuenta['moneda']}): {guardados} PDF(s) guardados")
 
@@ -160,36 +164,27 @@ class DescargaComprobantes(BaseFlow):
             "Verifica que el login fue exitoso y el menu esta disponible."
         )
 
-    def _abrir_movimientos_cuenta(self, numero: str, indice: int) -> None:
+    def _abrir_movimientos_cuenta(self, numero: str) -> None:
         """
-        Hace clic en el boton 'Ver' de la cuenta indicada.
+        Hace clic en el numero de cuenta para abrir su listado de movimientos.
 
-        Estrategia 1 — XPath por data-account + a.viewMovements (ALTA).
-        Estrategia 2 — XPath posicional por indice de aparicion (1 o 2).
+        DOM: <div class="col-sm-12 col-md-5 btn-detail" data-column="2">000-3991288</div>
+        Estabilidad ALTA — se busca por texto exacto del numero de cuenta.
         """
-        xpath_especifico = S.link_ver_cuenta(numero)
-        if self.elemento_presente(xpath_especifico, timeout=10):
-            self.click_xpath(xpath_especifico)
+        xpath = S.click_numero_cuenta(numero)
+        if self.elemento_presente(xpath, timeout=10):
+            self.click_xpath(xpath)
             self.esperar(3)
-            logger.info(f"Cuenta {numero}: movimientos abiertos (data-account)")
-            self._guardar_dom(f"movimientos_{numero}")
-            return
-
-        # Fallback posicional
-        xpath_pos = S.BTN_VER_PRIMERO if indice == 0 else S.BTN_VER_SEGUNDO
-        if self.elemento_presente(xpath_pos, timeout=5):
-            self.click_xpath(xpath_pos)
-            self.esperar(3)
-            logger.info(f"Cuenta {numero}: movimientos abiertos (posicion {indice + 1})")
+            logger.info(f"Cuenta {numero}: movimientos abiertos (click en numero de cuenta)")
             self._guardar_dom(f"movimientos_{numero}")
             return
 
         self._guardar_dom(f"movimientos_{numero}_fallido")
-        raise RuntimeError(f"No se pudo abrir los movimientos de la cuenta {numero}")
+        raise RuntimeError(f"No se pudo encontrar el numero de cuenta {numero} en la tabla")
 
-    def _aplicar_filtro_fecha(self, fecha: str) -> None:
+    def _aplicar_filtro_fecha(self, fecha_desde: str, fecha_hasta: str) -> None:
         """
-        Abre el panel de filtro, ingresa la fecha inicio y fin, y aplica.
+        Abre el panel de filtro, ingresa fecha inicio y fin, y aplica.
 
         Los inputs usan jQuery UI Datepicker → send_keys funciona directamente.
         Si send_keys falla, se usa JS como fallback.
@@ -201,9 +196,9 @@ class DescargaComprobantes(BaseFlow):
         self.esperar(1.5)
         logger.debug("Panel de filtros abierto")
 
-        # Ingresar fecha inicio y fin (misma fecha)
-        for xpath, etiqueta in [(S.INPUT_FECHA_DESDE, "desde"), (S.INPUT_FECHA_HASTA, "hasta")]:
-            self._ingresar_fecha_input(xpath, fecha, etiqueta)
+        # Ingresar fecha inicio y fin
+        self._ingresar_fecha_input(S.INPUT_FECHA_DESDE, fecha_desde, "desde")
+        self._ingresar_fecha_input(S.INPUT_FECHA_HASTA, fecha_hasta, "hasta")
         self.esperar(0.5)
 
         self._guardar_dom("antes_filtro")
@@ -214,7 +209,7 @@ class DescargaComprobantes(BaseFlow):
             raise RuntimeError("No se encontro el boton 'APLICAR'")
         self.click_xpath(S.BTN_APLICAR_FILTRO)
         self.esperar(4)
-        logger.info(f"Filtro aplicado: {fecha}")
+        logger.info(f"Filtro aplicado: {fecha_desde} → {fecha_hasta}")
         self._guardar_dom("post_filtro")
 
     def _ingresar_fecha_input(self, xpath: str, fecha: str, etiqueta: str) -> None:
@@ -249,34 +244,56 @@ class DescargaComprobantes(BaseFlow):
 
     def _volver_a_general_saldos(self) -> None:
         """
-        Regresa a la pantalla principal de cuentas (General de Saldos).
-        Intenta el boton Regresar; fallback: browser back; fallback: menu.
+        Regresa a la pantalla de General de Saldos desde la vista de movimientos.
+
+        Estrategia 1 — breadcrumb visible en la pagina de movimientos:
+          <ol class="breadcrumb"> ... <a href="#C1000-consultas">General de Saldos</a>
+        Estrategia 2 — item del menu Consultas (ID unico navigation-menu-C1000):
+          requiere que el menu Consultas este abierto o sea clickeable.
+        Estrategia 3 — abrir menu Consultas y luego hacer click en el item.
         """
-        btn_regresar = '//a[normalize-space()="Regresar"] | //button[normalize-space()="Regresar"]'
-        if self.elemento_presente(btn_regresar, timeout=4):
-            self.click_xpath(btn_regresar)
+        # Estrategia 1: breadcrumb directo (disponible en la pagina de movimientos)
+        if self.elemento_presente(S.BREADCRUMB_GENERAL_SALDOS, timeout=5):
+            self.click_xpath(S.BREADCRUMB_GENERAL_SALDOS)
             self.esperar(2)
-            logger.debug("Regresado a General de Saldos (boton Regresar)")
+            logger.info("Regresado a General de Saldos (breadcrumb)")
+            self._guardar_dom("general_saldos_vuelto")
             return
 
-        self.volver_atras()
-        self.esperar(2)
-        logger.debug("Regresado a General de Saldos (browser back)")
+        # Estrategia 2: item del menu si ya esta visible
+        if self.elemento_presente(S.MENU_ITEM_GENERAL_SALDOS, timeout=3):
+            self.click_xpath(S.MENU_ITEM_GENERAL_SALDOS)
+            self.esperar(2)
+            logger.info("Regresado a General de Saldos (menu item directo)")
+            self._guardar_dom("general_saldos_vuelto")
+            return
+
+        # Estrategia 3: abrir menu Consultas y luego click en General de Saldos
+        if self.elemento_presente(S.MENU_CONSULTAS, timeout=5):
+            self.click_xpath(S.MENU_CONSULTAS)
+            self.esperar(1)
+            if self.elemento_presente(S.MENU_ITEM_GENERAL_SALDOS, timeout=5):
+                self.click_xpath(S.MENU_ITEM_GENERAL_SALDOS)
+                self.esperar(2)
+                logger.info("Regresado a General de Saldos (menu Consultas → General de Saldos)")
+                self._guardar_dom("general_saldos_vuelto")
+                return
+
+        self._guardar_dom("volver_general_saldos_fallido")
+        raise RuntimeError("No se pudo volver a General de Saldos")
 
     # ------------------------------------------------------------------
     # Procesamiento de filas
     # ------------------------------------------------------------------
 
-    def _procesar_cuenta(self, numero: str, moneda: str, fecha: str, max_pdfs: Optional[int] = None) -> int:
+    def _procesar_cuenta(self, numero: str, moneda: str, fecha_desde: str, fecha_hasta: str, max_pdfs: Optional[int] = None) -> int:
         """Procesa todas las filas validas de una cuenta. Retorna PDFs guardados."""
         logger.info(f"--- Procesando cuenta {numero} ({moneda}) ---")
 
-        cuentas_lista = S.CUENTAS
-        indice = next((i for i, c in enumerate(cuentas_lista) if c["numero"] == numero), 0)
-        self._abrir_movimientos_cuenta(numero, indice)
-        self._aplicar_filtro_fecha(fecha)
+        self._abrir_movimientos_cuenta(numero)
+        self._aplicar_filtro_fecha(fecha_desde, fecha_hasta)
 
-        guardados = self._guardar_comprobantes_filas_validas(numero, fecha, max_pdfs)
+        guardados = self._guardar_comprobantes_filas_validas(numero, fecha_desde, max_pdfs)
 
         self._volver_a_general_saldos()
         return guardados
@@ -420,39 +437,108 @@ class DescargaComprobantes(BaseFlow):
             logger.warning(f"No se pudo cerrar el modal: {e}")
 
     # ------------------------------------------------------------------
-    # PDF via CDP
+    # PDF via CDP — popup window
     # ------------------------------------------------------------------
 
     def _guardar_pdf(self, nombre_archivo: str) -> bool:
         """
-        Guarda la pagina actual (con modal visible) como PDF usando CDP Page.printToPDF.
-        Los estilos @media print de Scotiabank focalizan el contenido del modal.
+        Guarda el comprobante como PDF usando CDP Page.printToPDF sobre la
+        ventana popup que abre el boton imprimir del portal Scotiabank.
+
+        Flujo:
+          1. Registrar ventanas abiertas antes del click.
+          2. Bloquear window.print en la ventana popup para que no abra
+             el dialogo nativo del sistema operativo.
+          3. Hacer click en el boton imprimir (a#print-movement-details).
+             El portal abre un popup about:blank con el contenido del
+             comprobante ya formateado y llama a window.print() en el.
+          4. Esperar a que aparezca la nueva ventana.
+          5. Cambiar el foco del driver a la popup.
+          6. Ejecutar CDP Page.printToPDF sobre la popup y guardar el archivo.
+          7. Cerrar la popup y volver a la ventana principal.
 
         Retorna True si el archivo fue guardado exitosamente.
         """
+        ventana_principal = self.driver.current_window_handle
+        ventanas_antes = set(self.driver.window_handles)
+        popup_handle = None
+
         try:
-            # Bloquear window.print nativo para evitar dialogo si el boton lo dispara
+            # Interceptar window.open en la ventana principal ANTES del click.
+            # El portal abre el popup via window.open() y llama popup.print()
+            # de forma sincrona (o casi). Al sobreescribir window.open aqui,
+            # bloqueamos popup.print en el instante de creacion, antes de que
+            # cualquier script del popup pueda invocarlo y abrir el dialogo nativo.
+            self.driver.execute_script("""
+                if (!window._scot_print_intercepted) {
+                    window._scot_print_intercepted = true;
+                    const _origOpen = window.open.bind(window);
+                    window.open = function() {
+                        const w = _origOpen.apply(window, arguments);
+                        if (w) {
+                            try {
+                                w.print = function(){};
+                                w.close = function(){};
+                            } catch(e) {}
+                            setTimeout(function(){
+                                try {
+                                    w.print = function(){};
+                                    w.close = function(){};
+                                } catch(e) {}
+                            }, 0);
+                        }
+                        return w;
+                    };
+                }
+            """)
+
+            # Click en el boton imprimir — abre popup
+            if not self.elemento_presente_js(S.BTN_IMPRIMIR):
+                raise RuntimeError("Boton imprimir no encontrado en el modal")
+            self.click_js_css(S.BTN_IMPRIMIR)
+
+            # Esperar a que aparezca la nueva ventana (max 10 s)
+            for _ in range(20):
+                nuevas = set(self.driver.window_handles) - ventanas_antes
+                if nuevas:
+                    popup_handle = nuevas.pop()
+                    break
+                time.sleep(0.5)
+
+            if not popup_handle:
+                raise RuntimeError("La popup de impresion no se abrio tras el click")
+
+            # Cambiar a la popup
+            self.driver.switch_to.window(popup_handle)
+            self.esperar(1)
+
+            # Doble seguridad: bloquear window.print dentro de la popup
             self.driver.execute_script("window.print = function(){};")
 
+            # CDP sobre la popup
             result = self.driver.execute_cdp_cmd("Page.printToPDF", {
-                "landscape":        False,
-                "printBackground":  True,
+                "landscape":         False,
+                "printBackground":   True,
                 "preferCSSPageSize": True,
-                "paperWidth":       8.27,    # A4 en pulgadas
-                "paperHeight":      11.69,
-                "marginTop":        0.4,
-                "marginBottom":     0.4,
-                "marginLeft":       0.4,
-                "marginRight":      0.4,
+                "paperWidth":        8.27,   # A4 en pulgadas
+                "paperHeight":       11.69,
+                "marginTop":         0.4,
+                "marginBottom":      0.4,
+                "marginLeft":        0.4,
+                "marginRight":       0.4,
             })
 
             pdf_bytes = base64.b64decode(result["data"])
-            ruta = os.path.join(self._downloads_path, nombre_archivo)
             os.makedirs(self._downloads_path, exist_ok=True)
+
+            # Evitar sobreescribir archivos con el mismo nombre (ej: dos pagos de igual importe).
+            # Si "18.30 Scotiabank.pdf" ya existe → usar "18.30 Scotiabank (2).pdf", etc.
+            nombre_final = self._nombre_sin_colision(nombre_archivo)
+            ruta = os.path.join(self._downloads_path, nombre_final)
             with open(ruta, "wb") as f:
                 f.write(pdf_bytes)
 
-            logger.info(f"PDF guardado: {nombre_archivo} ({len(pdf_bytes):,} bytes)")
+            logger.info(f"PDF guardado: {nombre_final} ({len(pdf_bytes):,} bytes)")
             return True
 
         except Exception as e:
@@ -463,9 +549,43 @@ class DescargaComprobantes(BaseFlow):
             self._guardar_dom(f"pdf_cdp_error_{nombre_archivo[:30]}")
             return False
 
+        finally:
+            # Cerrar la popup si sigue abierta y volver a la ventana principal
+            try:
+                if popup_handle and popup_handle in self.driver.window_handles:
+                    self.driver.close()
+            except Exception:
+                pass
+            try:
+                self.driver.switch_to.window(ventana_principal)
+            except Exception as e:
+                logger.warning(f"No se pudo volver a la ventana principal: {e}")
+
     # ------------------------------------------------------------------
     # Utilidades
     # ------------------------------------------------------------------
+
+    def _nombre_sin_colision(self, nombre_archivo: str) -> str:
+        """
+        Si 'nombre_archivo' ya existe en downloads_path, agrega sufijo numerico
+        separado por espacio hasta encontrar un nombre libre.
+        Mismo patron que BCP e IBK: "{nombre_base} {contador}.pdf"
+
+        Ejemplos:
+          "18.30 Scotiabank.pdf"      → existe → "18.30 Scotiabank 2.pdf"
+          "18.30 Scotiabank 2.pdf"    → existe → "18.30 Scotiabank 3.pdf"
+        """
+        if not os.path.exists(os.path.join(self._downloads_path, nombre_archivo)):
+            return nombre_archivo
+
+        base, ext = os.path.splitext(nombre_archivo)
+        contador = 2
+        while True:
+            candidato = f"{base} {contador}{ext}"
+            if not os.path.exists(os.path.join(self._downloads_path, candidato)):
+                logger.debug(f"Colision de nombre: '{nombre_archivo}' → '{candidato}'")
+                return candidato
+            contador += 1
 
     def _monto_a_nombre(self, importe_formateado: str) -> str:
         """

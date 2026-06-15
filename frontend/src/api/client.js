@@ -49,6 +49,12 @@ export async function capturarDomBCP(sessionId) {
   return res.json()
 }
 
+export async function iniciarLibreBCP() {
+  const res = await fetch(`${BASE}/bcp/iniciar-libre`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
 export async function sesionActivaBCP() {
   const res = await fetch(`${BASE}/bcp/sesion-activa`)
   return res.json()
@@ -101,6 +107,12 @@ export async function capturarDomBBVA(sessionId) {
   return res.json()
 }
 
+export async function iniciarLibreBBVA() {
+  const res = await fetch(`${BASE}/bbva/iniciar-libre`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
 export async function sesionActivaBBVA() {
   const res = await fetch(`${BASE}/bbva/sesion-activa`)
   return res.json()
@@ -148,6 +160,12 @@ export async function capturarDomIBK(sessionId) {
   return res.json()
 }
 
+export async function iniciarLibreIBK() {
+  const res = await fetch(`${BASE}/ibk/iniciar-libre`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
 export async function sesionActivaIBK() {
   const res = await fetch(`${BASE}/ibk/sesion-activa`)
   return res.json()
@@ -176,11 +194,11 @@ export async function detenerPruebaCamaraIBK() {
 // Scotiabank
 // ---------------------------------------------------------------------------
 
-export async function iniciarScotiabank({ fecha, maxPdfs }) {
+export async function iniciarScotiabank({ fechaDesde, fechaHasta, maxPdfs }) {
   const res = await fetch(`${BASE}/scotiabank/iniciar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fecha, max_pdfs: maxPdfs ?? null }),
+    body: JSON.stringify({ fechaDesde, fechaHasta, max_pdfs: maxPdfs ?? null }),
   })
   if (!res.ok) throw new Error(extractError(await res.json()))
   return res.json()
@@ -202,6 +220,12 @@ export async function cancelarScotiabank(sessionId) {
 
 export async function capturarDomScotiabank(sessionId) {
   const res = await fetch(`${BASE}/scotiabank/${sessionId}/capturar-dom`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
+export async function iniciarLibreScotiabank() {
+  const res = await fetch(`${BASE}/scotiabank/iniciar-libre`, { method: 'POST' })
   if (!res.ok) throw new Error(extractError(await res.json()))
   return res.json()
 }

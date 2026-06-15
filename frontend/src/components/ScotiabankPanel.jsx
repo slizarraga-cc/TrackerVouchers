@@ -4,11 +4,16 @@ import {
   confirmarLoginScotiabank,
   cancelarScotiabank,
   capturarDomScotiabank,
+  iniciarLibreScotiabank,
   suscribirLogsScotiabank,
   getConfig,
   sesionActivaScotiabank,
 } from '../api/client'
 import { LogsPanel } from './LogsPanel'
+
+function todayISO() {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Lima' })
+}
 
 function ultimoDiaLaborable() {
   const limaHoy = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Lima' })
@@ -50,7 +55,8 @@ const STATUS_COLORS = {
 }
 
 export function ScotiabankPanel() {
-  const [fecha,         setFecha]         = useState(ultimoDiaLaborable)
+  const [fechaDesde,    setFechaDesde]    = useState(ultimoDiaLaborable)
+  const [fechaHasta,    setFechaHasta]    = useState(todayISO)
   const [maxPdfs,       setMaxPdfs]       = useState('')
   const [sessionId,     setSessionId]     = useState(null)
   const [status,        setStatus]        = useState(null)
@@ -111,7 +117,11 @@ export function ScotiabankPanel() {
     setLogs([])
     setResultado(null)
     try {
-      const data = await iniciarScotiabank({ fecha: toDisplayDate(fecha), maxPdfs: maxPdfs !== '' ? Number(maxPdfs) : null })
+      const data = await iniciarScotiabank({
+        fechaDesde: toDisplayDate(fechaDesde),
+        fechaHasta: toDisplayDate(fechaHasta),
+        maxPdfs: maxPdfs !== '' ? Number(maxPdfs) : null,
+      })
       setSessionId(data.session_id)
       setStatus(data.status)
     } catch (err) {
@@ -123,6 +133,19 @@ export function ScotiabankPanel() {
     setApiError(null)
     try {
       await confirmarLoginScotiabank(sessionId)
+    } catch (err) {
+      setApiError(err.message)
+    }
+  }
+
+  async function handleIniciarLibre() {
+    setApiError(null)
+    setLogs([])
+    setResultado(null)
+    try {
+      const data = await iniciarLibreScotiabank()
+      setSessionId(data.session_id)
+      setStatus(data.status)
     } catch (err) {
       setApiError(err.message)
     }
@@ -190,13 +213,23 @@ export function ScotiabankPanel() {
             <form onSubmit={handleIniciar}>
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Fecha</label>
+                  <label className="form-label">Fecha desde</label>
                   <input
                     className="form-input"
                     type="date"
                     required
-                    value={fecha}
-                    onChange={(e) => setFecha(e.target.value)}
+                    value={fechaDesde}
+                    onChange={(e) => setFechaDesde(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Fecha hasta</label>
+                  <input
+                    className="form-input"
+                    type="date"
+                    required
+                    value={fechaHasta}
+                    onChange={(e) => setFechaHasta(e.target.value)}
                   />
                 </div>
                 <div className="form-group">
@@ -223,6 +256,15 @@ export function ScotiabankPanel() {
               <button className="btn-primary" type="submit">
                 <i className="fa-solid fa-play" />
                 Iniciar descarga
+              </button>
+              <button
+                className="btn-outline"
+                type="button"
+                onClick={handleIniciarLibre}
+                style={{ marginLeft: '8px' }}
+              >
+                <i className="fa-solid fa-binoculars" />
+                Solo navegar
               </button>
             </form>
           </div>

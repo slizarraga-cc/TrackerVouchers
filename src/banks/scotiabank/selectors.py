@@ -46,17 +46,29 @@ class ScotiabankSelectors:
     LINK_GENERAL_SALDOS = 'a[href="#C1000-consultas"]'
 
     # -------------------------------------------------------------------------
+    # Volver a General de Saldos (desde la vista de movimientos de una cuenta)
+    # -------------------------------------------------------------------------
+    # Estrategia 1 — breadcrumb visible en la pagina de movimientos.
+    # DOM: <a href="#C1000-consultas" class="router">General de Saldos</a>
+    # Estabilidad ALTA — href es ancla fija; XPath filtra por texto para evitar
+    # coincidir con el link del submenu del menu abierto.
+    BREADCRUMB_GENERAL_SALDOS = (
+        '//ol[contains(@class,"breadcrumb")]//a[@href="#C1000-consultas"]'
+    )
+    # Estrategia 2 — item del menu Consultas con ID unico.
+    # DOM: <a href="#C1000-consultas" class="router" id="navigation-menu-C1000">
+    # Estabilidad ALTA — ID fijo asignado por el sistema.
+    MENU_ITEM_GENERAL_SALDOS = '//a[@id="navigation-menu-C1000"]'
+
+    # -------------------------------------------------------------------------
     # Tabla de cuentas — General de Saldos
     # -------------------------------------------------------------------------
-    # Link "Ver" dentro del contenedor de una cuenta especifica.
-    # data-account es un atributo semantico: estabilidad ALTA.
+    # Click en el numero de cuenta (div.btn-detail con texto del numero).
+    # Estabilidad ALTA — texto del numero de cuenta es el identificador natural.
+    # DOM: <div class="col-sm-12 col-md-5 btn-detail" data-column="2">000-3991288</div>
     @staticmethod
-    def link_ver_cuenta(numero: str) -> str:
-        return f'//div[@data-account="{numero}"]//a[contains(@class,"viewMovements")]'
-
-    # Fallback: primer a.viewMovements de la pagina (si no hay data-account)
-    BTN_VER_PRIMERO  = '(//a[contains(@class,"viewMovements")])[1]'
-    BTN_VER_SEGUNDO  = '(//a[contains(@class,"viewMovements")])[2]'
+    def click_numero_cuenta(numero: str) -> str:
+        return f'//div[contains(@class,"btn-detail") and normalize-space()="{numero}"]'
 
     # -------------------------------------------------------------------------
     # Filtro de movimientos
@@ -65,9 +77,10 @@ class ScotiabankSelectors:
     BTN_FILTRAR        = '//a[contains(@class,"butt-filtro") and contains(@class,"filtrar-active")]'
     BTN_APLICAR_FILTRO = '//input[contains(@class,"btn-aplicar-filtros")]'
 
-    # Inputs de fecha — estabilidad MEDIA (placeholder puede cambiar)
-    INPUT_FECHA_DESDE = '(//input[@placeholder="dd/mm/aaaa"])[1]'
-    INPUT_FECHA_HASTA = '(//input[@placeholder="dd/mm/aaaa"])[2]'
+    # Inputs de fecha — estabilidad ALTA (IDs fijos en el DOM)
+    # DOM: <input id="dpDesde" ...> y <input id="dpHasta" ...>
+    INPUT_FECHA_DESDE = '//input[@id="dpDesde"]'
+    INPUT_FECHA_HASTA = '//input[@id="dpHasta"]'
 
     # -------------------------------------------------------------------------
     # Tabla de movimientos
@@ -95,9 +108,10 @@ class ScotiabankSelectors:
     BTN_IMPRIMIR      = "a#print-movement-details"
     BTN_IMPRIMIR_XPATH = '//*[@id="print-movement-details"]'
 
-    # Boton cerrar modal — estabilidad ALTA (Bootstrap .close + data-dismiss)
-    BTN_CERRAR_MODAL  = 'button.close[data-dismiss="modal"]'
-    BTN_CERRAR_XPATH  = '//button[@data-dismiss="modal" and contains(@class,"close")]'
+    # Boton cerrar modal — scopeado al modal de detalle para evitar ambiguedad
+    # (hay multiples button.close[data-dismiss="modal"] en la pagina)
+    BTN_CERRAR_MODAL  = '#modalDetalleMovimiento button.close[data-dismiss="modal"]'
+    BTN_CERRAR_XPATH  = '//*[@id="modalDetalleMovimiento"]//button[@data-dismiss="modal" and contains(@class,"close")]'
 
     # -------------------------------------------------------------------------
     # Indicadores de carga / espera

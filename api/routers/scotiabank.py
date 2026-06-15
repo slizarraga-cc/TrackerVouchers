@@ -60,7 +60,41 @@ def _capturar_dom_en_error(session: Session) -> None:
         logger.debug(f"[DOM-ERROR] No se pudo capturar el DOM: {dom_err}")
 
 
-def _run_flow(session: Session, fecha: str, max_pdfs: int | None = None):
+def _run_libre(session: Session):
+    thread_id = threading.current_thread().ident
+    with _ts_lock:
+        _thread_sessions[thread_id] = session
+
+    try:
+        from src.core.driver import get_driver
+        from src.banks.scotiabank.selectors import ScotiabankSelectors as S
+
+        logger.info("Conectando al Selenium Grid Scotiabank (modo libre)...")
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_SCOTIABANK)
+        session.driver = driver
+
+        logger.info("Navegando al portal Scotiabank Empresas...")
+        driver.get(S.PORTAL_URL)
+
+        session.status = SessionStatus.LIBRE
+        logger.info("Modo libre activo. Navega libremente e inspecciona el DOM cuando quieras.")
+
+    except Exception as e:
+        session.status = SessionStatus.ERROR
+        session.error = str(e)
+        logger.error(f"Error al iniciar modo libre: {e}")
+    finally:
+        with _ts_lock:
+            _thread_sessions.pop(thread_id, None)
+        if session.driver and session.status != SessionStatus.LIBRE:
+            try:
+                session.driver.quit()
+            except Exception:
+                pass
+            session.driver = None
+
+
+def _run_flow(session: Session, fecha_desde: str, fecha_hasta: str, max_pdfs: int | None = None):
     thread_id = threading.current_thread().ident
     with _ts_lock:
         _thread_sessions[thread_id] = session
@@ -103,10 +137,10 @@ def _run_flow(session: Session, fecha: str, max_pdfs: int | None = None):
             return
 
         session.status = SessionStatus.EJECUTANDO
-        logger.info("Login confirmado. Iniciando descarga de comprobantes Scotiabank...")
+        logger.info(f"Login confirmado. Iniciando descarga de comprobantes Scotiabank ({fecha_desde} → {fecha_hasta})...")
 
         flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH)
-        descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
+        descargados = flow.ejecutar(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, max_pdfs=max_pdfs)
 
         session.resultado = descargados
         session.status    = SessionStatus.COMPLETADO
@@ -150,8 +184,25 @@ def sesion_activa():
 
 
 class IniciarRequest(BaseModel):
-    fecha: str            # DD/MM/YYYY
+    fechaDesde: str       # DD/MM/YYYY
+    fechaHasta: str       # DD/MM/YYYY
     max_pdfs: int | None = None
+
+
+@router.post("/iniciar-libre")
+def iniciar_libre():
+    """Abre el navegador directamente en modo libre sin ejecutar ningún flujo."""
+    activa = session_manager.get_activa("scotiabank")
+    if activa:
+        raise HTTPException(
+            400,
+            f"Ya hay una sesion de Scotiabank en curso ({activa.status}). "
+            "Cancelala antes de iniciar una nueva.",
+        )
+    session = session_manager.crear("scotiabank")
+    t = threading.Thread(target=_run_libre, args=(session,), daemon=True)
+    t.start()
+    return {"session_id": session.id, "status": session.status.value}
 
 
 @router.post("/iniciar")
@@ -167,7 +218,7 @@ def iniciar(req: IniciarRequest):
     session = session_manager.crear("scotiabank")
     t = threading.Thread(
         target=_run_flow,
-        args=(session, req.fecha, req.max_pdfs),
+        args=(session, req.fechaDesde, req.fechaHasta, req.max_pdfs),
         daemon=True,
     )
     t.start()

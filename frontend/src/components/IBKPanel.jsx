@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { iniciarIBK, confirmarLoginIBK, cancelarIBK, capturarDomIBK, suscribirLogsIBK, getConfig, sesionActivaIBK, conectarCameraRelay } from '../api/client'
+import { iniciarIBK, confirmarLoginIBK, cancelarIBK, capturarDomIBK, iniciarLibreIBK, suscribirLogsIBK, getConfig, sesionActivaIBK, conectarCameraRelay } from '../api/client'
 import { LogsPanel } from './LogsPanel'
 
 function hoyLima() {
@@ -205,6 +205,19 @@ export function IBKPanel() {
     }
   }
 
+  async function handleIniciarLibre() {
+    setApiError(null)
+    setLogs([])
+    setResultado(null)
+    try {
+      const data = await iniciarLibreIBK()
+      setSessionId(data.session_id)
+      setStatus(data.status)
+    } catch (err) {
+      setApiError(err.message)
+    }
+  }
+
   async function handleCancelar() {
     if (sessionId) await cancelarIBK(sessionId)
     reset()
@@ -318,6 +331,15 @@ export function IBKPanel() {
               <button className="btn-primary" type="submit">
                 <i className="fa-solid fa-play" />
                 Iniciar descarga
+              </button>
+              <button
+                className="btn-outline"
+                type="button"
+                onClick={handleIniciarLibre}
+                style={{ marginLeft: '8px' }}
+              >
+                <i className="fa-solid fa-binoculars" />
+                Solo navegar
               </button>
             </form>
           </div>

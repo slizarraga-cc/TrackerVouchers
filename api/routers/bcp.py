@@ -115,6 +115,44 @@ def _capturar_dom_en_error(session: Session, banco: str = 'BCP') -> None:
 
 
 # ---------------------------------------------------------------------------
+# Background flow — modo libre directo
+# ---------------------------------------------------------------------------
+
+def _run_libre(session: Session):
+    thread_id = threading.current_thread().ident
+    with _ts_lock:
+        _thread_sessions[thread_id] = session
+
+    try:
+        from src.core.driver import get_driver
+        from src.banks.bcp.selectors import BCPSelectors as S
+
+        logger.info("Conectando al Selenium Grid (modo libre)...")
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP)
+        session.driver = driver
+
+        logger.info("Navegando al portal BCP...")
+        driver.get(S.LOGIN_URL)
+
+        session.status = SessionStatus.LIBRE
+        logger.info("Modo libre activo. Navega libremente e inspecciona el DOM cuando quieras.")
+
+    except Exception as e:
+        session.status = SessionStatus.ERROR
+        session.error = str(e)
+        logger.error(f"Error al iniciar modo libre: {e}")
+    finally:
+        with _ts_lock:
+            _thread_sessions.pop(thread_id, None)
+        if session.driver and session.status != SessionStatus.LIBRE:
+            try:
+                session.driver.quit()
+            except Exception:
+                pass
+            session.driver = None
+
+
+# ---------------------------------------------------------------------------
 # Background flow
 # ---------------------------------------------------------------------------
 
@@ -224,6 +262,22 @@ class IniciarRequest(BaseModel):
     fecha_desde: str  # DD/MM/YYYY
     fecha_hasta: str  # DD/MM/YYYY
     max_pdfs: int | None = None
+
+
+@router.post("/iniciar-libre")
+def iniciar_libre():
+    """Abre el navegador directamente en modo libre sin ejecutar ningún flujo."""
+    activa = session_manager.get_activa("bcp")
+    if activa:
+        raise HTTPException(
+            400,
+            f"Ya hay una sesion de BCP en curso ({activa.status}). "
+            "Cancelala antes de iniciar una nueva.",
+        )
+    session = session_manager.crear("bcp")
+    t = threading.Thread(target=_run_libre, args=(session,), daemon=True)
+    t.start()
+    return {"session_id": session.id, "status": session.status.value}
 
 
 @router.post("/iniciar")
