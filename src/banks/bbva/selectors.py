@@ -146,26 +146,32 @@ class BBVASelectors:
 
     # Tabla de Relacion de Operaciones (dentro de IFRAME_CENTRAL)
     # Estructura HTML clasica — sin Web Components
+    # Confirmado en dom_tabla.html capturado 16/06/2026
     # Estabilidad: ALTA (class funcional documentado)
-    TABLE_DATA     = 'table.tb_data'
-    TABLE_ROW_DATA = 'tr.even, tr.odd'   # filas alternas de datos
+    TABLE_DATA = 'table.tb_data'
 
     # Columnas de la tabla (0-based)
-    # | Tipo Operacion | Beneficiario | Fecha y Hora | Importe | Moneda | N° Op | N° Ref |
-    COL2_TIPO_OP    = 0
-    COL2_BENEFIC    = 1
-    COL2_FECHA_HORA = 2
-    COL2_IMPORTE    = 3
-    COL2_MONEDA     = 4
-    COL2_NRO_OP     = 5
-    COL2_NRO_REF    = 6
+    # Confirmado en dom_tabla.html — filas tr.even:
+    # | Tipo Operación | Beneficiario | Fecha y Hora | Importe | Moneda | Usuario |
+    # |       0        |      1       |      2       |    3    |   4    |    5   |
+    COL2_TIPO_OP      = 0   # contiene a.enlace para navegar al detalle
+    COL2_BENEFICIARIO = 1
+    COL2_FECHA_HORA   = 2   # "DD/MM/YYYY HH:MM:SS" — columna de fecha para filtrar
+    COL2_IMPORTE      = 3   # monto numerico a usar como nombre de archivo
+    COL2_MONEDA       = 4   # "SOLES" | "DÓLARES"
+    COL2_USUARIO      = 5
 
-    # Enlace en columna Tipo de Operacion
-    # Ref: <a class="enlace">TRANSF A CTAS DE TERCEROS</a>
-    # Estabilidad: ALTA (class funcional)
+    # Link al detalle de la operacion (columna Tipo Operacion)
+    # Ref: <a class="enlace" href="OperacionCBTFServlet?...&Indicador=N">TRANSF ...</a>
+    # Estabilidad: ALTA (class funcional, unico enlace en la fila)
     ENLACE_TIPO_OP = 'a.enlace'
 
-    # Boton Volver (parte inferior izquierda del detalle)
+    # Paginacion — boton Siguiente al pie de la tabla
+    # Ref: <a class="bt_next" href="OperacionCBTFServlet?...&accion=masDatos&...">
+    # Estabilidad: ALTA (class funcional)
+    BTN_SIGUIENTE = 'a.bt_next'
+
+    # Boton Volver (parte inferior del detalle de la operacion)
     # Ref: <a class="bt_previous">Volver</a>
     # Estabilidad: ALTA (class funcional)
     BTN_VOLVER = 'a.bt_previous'

@@ -39,8 +39,7 @@ class Operacion:
     fecha_hora: str = ""
     importe: str = ""
     moneda: str = ""
-    nro_operacion: str = ""
-    nro_referencia: str = ""
+    usuario: str = ""
 
 
 class ConsultaOperaciones(BaseFlow):
@@ -296,20 +295,15 @@ class ConsultaOperaciones(BaseFlow):
 
     def _leer_operaciones(self, fecha_filtro: str) -> List[Operacion]:
         """
-        Escanea table.tb_data en orden y extrae el bloque de operaciones
-        cuya columna 'Fecha y Hora' comienza con fecha_filtro.
+        Lee table.tb_data via JavaScript para evitar stale element references.
+
+        Estructura de columnas (0-based, confirmado en dom_tabla.html 16/06/2026):
+          | Tipo Operación | Beneficiario | Fecha y Hora | Importe | Moneda | Usuario |
+          |       0        |      1       |      2       |    3    |   4    |    5   |
 
         Logica de escaneo secuencial:
-          - Recorre filas de arriba a abajo.
-          - Cuando encuentra la primera fila con fecha_filtro, activa el bloque.
-          - Sigue acumulando filas mientras la fecha coincida.
-          - Para en cuanto la fecha cambia (bloque contiguo completado).
-          Esto es mas eficiente que filtrar toda la tabla y refleja que
-          las operaciones del mismo dia estan agrupadas consecutivamente.
-
-        Estructura de columnas (0-based, confirmado en informe 03/06/2026):
-          | Tipo Operacion | Beneficiario | Fecha y Hora | Importe | Moneda | N° Op | N° Ref |
-          |      0         |      1       |      2       |    3    |   4    |   5   |   6    |
+          - Activa el bloque cuando encuentra la primera fila con fecha_filtro en col 2.
+          - Para cuando la fecha cambia (tabla ordenada descendente por fecha).
         """
         self._switch_to_iframe_central()
 
@@ -317,41 +311,49 @@ class ConsultaOperaciones(BaseFlow):
             EC.presence_of_element_located((By.CSS_SELECTOR, S.TABLE_DATA))
         )
 
-        # Usar selector amplio para no perder filas por clase incorrecta
-        filas = self.driver.find_elements(By.CSS_SELECTOR, 'table.tb_data tr')
+        # Leer toda la tabla via JS de una vez — evita stale element references.
+        # Saltamos filas con clase 'header' (tb_header y tb_column_header).
+        filas_data = self.driver.execute_script("""
+            const tabla = document.querySelector(arguments[0]);
+            if (!tabla) return [];
+            const result = [];
+            for (const tr of tabla.querySelectorAll('tr')) {
+                if (tr.className && tr.className.includes('header')) continue;
+                const celdas = Array.from(tr.querySelectorAll('td'));
+                if (celdas.length < 5) continue;
+                result.push({
+                    clase: tr.className,
+                    celdas: celdas.map(td => td.innerText.trim())
+                });
+            }
+            return result;
+        """, S.TABLE_DATA)
+
         operaciones: List[Operacion] = []
         bloque_activo = False
 
-        # Diagnostico: loguear primeras 5 filas para verificar estructura real
-        for i, fila in enumerate(filas[:5]):
-            celdas_diag = fila.find_elements(By.TAG_NAME, 'td')
-            valores = [c.text.strip()[:30] for c in celdas_diag]
-            logger.debug(f"[DIAG fila {i}] class={fila.get_attribute('class')!r} | celdas={len(celdas_diag)} | valores={valores}")
+        # Diagnostico: primeras 3 filas
+        for i, f in enumerate(filas_data[:3]):
+            logger.debug(f"[DIAG fila {i}] class={f['clase']!r} | celdas={len(f['celdas'])} | valores={f['celdas']}")
 
-        for fila in filas:
-            celdas = fila.find_elements(By.TAG_NAME, 'td')
-            if len(celdas) < 4:
+        for fila in filas_data:
+            celdas = fila["celdas"]
+            if len(celdas) <= S.COL2_FECHA_HORA:
                 continue
 
-            fecha_hora = celdas[S.COL2_FECHA_HORA].text.strip()
+            fecha_hora = celdas[S.COL2_FECHA_HORA]
 
             if fecha_hora.startswith(fecha_filtro):
                 bloque_activo = True
-
-                def celda(idx: int) -> str:
-                    return celdas[idx].text.strip() if len(celdas) > idx else ""
-
                 operaciones.append(Operacion(
-                    tipo_operacion=celda(S.COL2_TIPO_OP),
-                    beneficiario=celda(S.COL2_BENEFIC),
-                    fecha_hora=fecha_hora,
-                    importe=celda(S.COL2_IMPORTE),
-                    moneda=celda(S.COL2_MONEDA),
-                    nro_operacion=celda(S.COL2_NRO_OP),
-                    nro_referencia=celda(S.COL2_NRO_REF),
+                    tipo_operacion = celdas[S.COL2_TIPO_OP],
+                    beneficiario   = celdas[S.COL2_BENEFICIARIO],
+                    fecha_hora     = fecha_hora,
+                    importe        = celdas[S.COL2_IMPORTE],
+                    moneda         = celdas[S.COL2_MONEDA],
+                    usuario        = celdas[S.COL2_USUARIO] if len(celdas) > S.COL2_USUARIO else "",
                 ))
             elif bloque_activo:
-                # Fecha distinta despues del bloque — no hay mas operaciones del dia
                 logger.debug(
                     f"Cambio de fecha detectado ({fecha_hora}) — "
                     f"bloque {fecha_filtro} completo con {len(operaciones)} operaciones"
@@ -362,7 +364,7 @@ class ConsultaOperaciones(BaseFlow):
 
         logger.info(f"Operaciones para {fecha_filtro}: {len(operaciones)}")
         for op in operaciones:
-            logger.info(f"  [{op.fecha_hora}] {op.tipo_operacion} | {op.moneda} {op.importe}")
+            logger.info(f"  [{op.fecha_hora}] {op.tipo_operacion} | {op.beneficiario} | {op.moneda} {op.importe}")
 
         return operaciones
 
@@ -379,7 +381,7 @@ class ConsultaOperaciones(BaseFlow):
     def _renombrar_pdf_nuevo(self, pdfs_antes: set, op: Operacion) -> None:
         """
         Espera hasta 30s a que aparezca un PDF nuevo y lo renombra
-        a '<importe> BBVA.pdf'. Si ya existe, agrega nro_operacion.
+        a '<importe> BBVA.pdf'. Si ya existe, agrega beneficiario.
         """
         deadline = time.time() + 30
         nuevo_archivo = None
@@ -399,14 +401,15 @@ class ConsultaOperaciones(BaseFlow):
 
         importe_safe = re.sub(r'[<>:"/\\|?*\n\r\t]', '', op.importe).strip()
         if not importe_safe:
-            importe_safe = op.nro_operacion or op.tipo_operacion[:20]
+            importe_safe = op.beneficiario[:20] or op.tipo_operacion[:20]
 
         nombre_destino = f"{importe_safe} BBVA.pdf"
         ruta_origen  = os.path.join(self._downloads_path, nuevo_archivo)
         ruta_destino = os.path.join(self._downloads_path, nombre_destino)
 
         if os.path.exists(ruta_destino):
-            nombre_destino = f"{importe_safe} {op.nro_operacion} BBVA.pdf"
+            beneficiario_safe = re.sub(r'[<>:"/\\|?*\n\r\t]', '', op.beneficiario[:20]).strip()
+            nombre_destino = f"{importe_safe} {beneficiario_safe} BBVA.pdf"
             ruta_destino = os.path.join(self._downloads_path, nombre_destino)
 
         try:
@@ -427,7 +430,7 @@ class ConsultaOperaciones(BaseFlow):
         for i, op in enumerate(operaciones[:total]):
             logger.info(
                 f"[{i + 1}/{total}] {op.fecha_hora} | {op.tipo_operacion} "
-                f"| {op.moneda} {op.importe}"
+                f"| {op.beneficiario} | {op.moneda} {op.importe}"
             )
             pdfs_antes = self._pdfs_actuales()
             try:
@@ -437,7 +440,7 @@ class ConsultaOperaciones(BaseFlow):
                 self._volver_a_lista()
             except Exception as e:
                 logger.error(
-                    f"Error en operacion {op.nro_operacion or op.tipo_operacion}: {e}"
+                    f"Error en operacion {op.tipo_operacion} | {op.fecha_hora}: {e}"
                 )
                 self._recuperar_lista()
 
@@ -452,31 +455,29 @@ class ConsultaOperaciones(BaseFlow):
         """
         Secuencia para descargar el PDF de una operacion:
 
-        Paso 1 — Click en columna Tipo de Operacion (a.enlace):
-          Identifica la fila exacta por (fecha_hora + importe).
-          Selector: a.enlace dentro de td[0] de la fila coincidente.
-          Ref: informe 03/06/2026 — class="enlace"
+        Paso 1 — Click en Ver Detalle (columna Acciones, col 7):
+          Identifica la fila exacta por (fecha_envio + importe).
+          Selector: a[title="Ver Detalle"] en td[7] de la fila coincidente.
 
-        Paso 2 — Esperar carga de consulta_especifica (detalle de la operacion).
+        Paso 2 — Esperar carga del detalle de la operacion.
 
         Paso 3 — Click en boton Exportar PDF:
-          Selector: a[title="Descargar Pdf"]  (hover visible: "Descargar Pdf")
-          Ref: informe 03/06/2026 — class="bt_m bt_azul bt_m_ic_r"
+          Selector: a[title="Descargar Pdf"]
           Si el servidor devuelve 503, la descarga falla silenciosamente
           y _renombrar_pdf_nuevo lo detecta por ausencia de archivo nuevo.
 
         Paso 4 — Cerrar ventanas extra (el boton usa target="_new").
         """
-        # Paso 1: click en el enlace de Tipo de Operacion en la tabla
+        # Paso 1: click en a.enlace (columna Tipo Operacion) en la tabla
         self._switch_to_iframe_central()
         enlace = self._buscar_enlace_operacion(op)
         if not enlace:
             raise RuntimeError(
-                f"No se encontro el enlace para: {op.tipo_operacion} | "
+                f"No se encontro enlace para: {op.tipo_operacion} | "
                 f"{op.fecha_hora} | {op.importe}"
             )
         self.click_js(enlace)
-        logger.debug(f"Click en Tipo de Operacion: {op.tipo_operacion} | {op.fecha_hora}")
+        logger.debug(f"Click en a.enlace: {op.tipo_operacion} | {op.fecha_hora}")
 
         # Paso 2: esperar carga del detalle
         self.esperar(4)
@@ -498,24 +499,27 @@ class ConsultaOperaciones(BaseFlow):
             self.driver.close()
             logger.debug("Ventana PDF extra cerrada")
         self.driver.switch_to.window(self._ventana_principal)
-        logger.success(f"PDF descargado | {op.moneda} {op.importe} | {op.tipo_operacion}")
+        logger.success(f"PDF descargado | {op.moneda} {op.importe} | {op.tipo_operacion} | {op.beneficiario}")
 
     def _buscar_enlace_operacion(self, op: Operacion):
         """
-        Busca el <a class='enlace'> de la fila que coincide con fecha_hora e importe.
-        Identifica la fila por dos campos de negocio para evitar confusiones en caso
-        de importes repetidos.
-        Retorna el WebElement del enlace o None si no se encuentra.
+        Busca el a.enlace (col 0 - Tipo Operacion) de la fila que coincide
+        con fecha_hora e importe. Retorna el WebElement o None.
+
+        Identificamos la fila por dos campos de negocio (fecha + importe)
+        para evitar confusiones con importes repetidos.
         """
-        filas = self.driver.find_elements(By.CSS_SELECTOR, S.TABLE_ROW_DATA)
+        filas = self.driver.find_elements(By.CSS_SELECTOR, 'table.tb_data tr')
         for fila in filas:
             celdas = fila.find_elements(By.TAG_NAME, 'td')
-            if len(celdas) < 4:
+            if len(celdas) <= S.COL2_IMPORTE:
                 continue
             fecha = celdas[S.COL2_FECHA_HORA].text.strip()
             importe = celdas[S.COL2_IMPORTE].text.strip()
             if fecha == op.fecha_hora and importe == op.importe:
-                enlaces = fila.find_elements(By.CSS_SELECTOR, S.ENLACE_TIPO_OP)
+                enlaces = celdas[S.COL2_TIPO_OP].find_elements(
+                    By.CSS_SELECTOR, S.ENLACE_TIPO_OP
+                )
                 if enlaces:
                     return enlaces[0]
         return None
