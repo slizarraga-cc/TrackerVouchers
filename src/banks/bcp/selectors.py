@@ -149,6 +149,23 @@ class BCPSelectors:
     }
 
     # -------------------------------------------------------------------------
+    # Detalle de operacion — fecha
+    # Se prueban en orden hasta encontrar el primero que exista en el DOM.
+    # Patron: //div[normalize-space()="<label>"]/following-sibling::div[1]
+    # -------------------------------------------------------------------------
+    FECHA_LABELS = [
+        "Fecha de operación",
+        "Fecha operación",
+        "Fecha",
+        "Fecha de solicitud",
+        "Fecha de pago",
+        "Fecha valor",
+        "Fecha de acreditamiento",
+        "Fecha de ejecución",
+        "Fecha de proceso",
+    ]
+
+    # -------------------------------------------------------------------------
     # Paginacion
     # Ref: documentacion de flujo — PASO 4
     # Estabilidad: ALTA (aria-label es semantico, no de estilo)

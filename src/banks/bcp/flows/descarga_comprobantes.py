@@ -33,26 +33,25 @@ class DescargaComprobantes(BaseFlow):
         self._downloads_path = downloads_path
         self._logs_path = logs_path
 
-    def ejecutar(self, fecha_desde: str, fecha_hasta: str, max_pdfs: Optional[int] = None) -> int:
+    def ejecutar(self, fecha: str, max_pdfs: Optional[int] = None) -> int:
         """
         Ejecuta el flujo completo de descarga de PDFs.
 
         Args:
-            fecha_desde: Fecha inicio en formato DD/MM/YYYY
-            fecha_hasta:  Fecha fin en formato DD/MM/YYYY
-            max_pdfs:     Limite de PDFs a descargar. None = sin limite (descarga todos).
+            fecha:    Fecha en formato DD/MM/YYYY (se usa como fecha inicio y fin).
+            max_pdfs: Limite de PDFs a descargar. None = sin limite (descarga todos).
 
         Returns:
             Cantidad de PDFs descargados exitosamente
         """
         limite_str = str(max_pdfs) if max_pdfs is not None else "sin limite"
         logger.info(
-            f"Iniciando DescargaComprobantes | rango: {fecha_desde} -> {fecha_hasta} | max: {limite_str}"
+            f"Iniciando DescargaComprobantes | fecha: {fecha} | max: {limite_str}"
         )
 
-        # Guardamos las fechas para poder re-buscar si los resultados se pierden al volver
-        self._fecha_desde = fecha_desde
-        self._fecha_hasta = fecha_hasta
+        # Guardamos la fecha para poder re-buscar si los resultados se pierden al volver
+        self._fecha_desde = fecha
+        self._fecha_hasta = fecha
 
         self._navegar_a_bandeja()
         self._cerrar_modal_fraude()
@@ -60,7 +59,7 @@ class DescargaComprobantes(BaseFlow):
             self._seleccionar_estado_procesada()
         except Exception as e:
             logger.warning(f"Filtro Estado no aplicado (continuando): {e}")
-        self._ingresar_fechas(fecha_desde, fecha_hasta)
+        self._ingresar_fechas(fecha, fecha)
         self._ejecutar_busqueda()
 
         descargados = self._procesar_operaciones(max_pdfs)
@@ -302,6 +301,28 @@ class DescargaComprobantes(BaseFlow):
             logger.warning(f"[{codigo}] No se pudo leer monto para tipo '{tipo}': {e}")
             return "", tipo
 
+    def _extraer_fecha(self, codigo: str) -> str:
+        """
+        Intenta extraer la fecha de operacion del detalle abierto.
+
+        Prueba los labels de S.FECHA_LABELS en orden usando el patron:
+          //div[normalize-space()="<label>"]/following-sibling::div[1]
+
+        Retorna la fecha como cadena (ej: "22/04/2026") o "" si no se encontro.
+        """
+        for label in S.FECHA_LABELS:
+            xpath = f'//div[normalize-space()="{label}"]/following-sibling::div[1]'
+            try:
+                el = self.esperar_elemento(xpath, timeout=2)
+                fecha = el.text.strip()
+                if fecha:
+                    logger.info(f"[{codigo}] Fecha detectada (label='{label}'): {fecha}")
+                    return fecha
+            except Exception:
+                continue
+        logger.warning(f"[{codigo}] No se pudo detectar fecha en el detalle")
+        return ""
+
     def _capturar_dom_monto_no_encontrado(self, codigo: str) -> None:
         """
         Guarda el DOM completo del detalle cuando no se puede extraer el monto.
@@ -418,6 +439,7 @@ class DescargaComprobantes(BaseFlow):
                 try:
                     self._abrir_operacion(fila)
                     monto, tipo_op = self._extraer_monto(codigo)
+                    fecha_op = self._extraer_fecha(codigo)
                     if not monto:
                         self._capturar_dom_monto_no_encontrado(codigo)
                     if self._descargar_pdf(codigo, tipo_op):

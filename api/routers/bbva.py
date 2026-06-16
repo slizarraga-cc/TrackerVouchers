@@ -148,7 +148,10 @@ def _run_libre(session: Session):
             session.driver = None
 
 
-def _run_flow(session: Session, fecha: str, max_pdfs):
+FLUJOS_DISPONIBLES = ["seguimiento_pagos", "consulta_operaciones"]
+
+
+def _run_flow(session: Session, fecha: str, max_pdfs, flujo: str):
     thread_id = threading.current_thread().ident
     with _ts_lock:
         _thread_sessions[thread_id] = session
@@ -157,6 +160,7 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
         from src.core.driver import get_driver
         from src.banks.bbva.selectors import BBVASelectors as S
         from src.banks.bbva.flows.seguimiento_pagos import SeguimientoPagosMasivos
+        from src.banks.bbva.flows.consulta_operaciones import ConsultaOperaciones
 
         logger.info("Conectando al Selenium Grid...")
         driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BBVA)
@@ -213,10 +217,17 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
             return
 
         session.status = SessionStatus.EJECUTANDO
-        logger.info("Login confirmado. Iniciando seguimiento de pagos masivos...")
 
-        flow = SeguimientoPagosMasivos(driver, downloads_path=DOWNLOADS_PATH)
-        descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
+        if flujo == "seguimiento_pagos":
+            logger.info("Login confirmado. Iniciando seguimiento de pagos masivos...")
+            flow = SeguimientoPagosMasivos(driver, downloads_path=DOWNLOADS_PATH)
+            descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
+        elif flujo == "consulta_operaciones":
+            logger.info("Login confirmado. Iniciando consulta de operaciones...")
+            flow = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH)
+            descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
+        else:
+            raise ValueError(f"Flujo desconocido: '{flujo}'. Disponibles: {FLUJOS_DISPONIBLES}")
 
         session.resultado = descargados
         session.status = SessionStatus.COMPLETADO
@@ -260,8 +271,9 @@ def sesion_activa():
 
 
 class IniciarRequest(BaseModel):
-    fecha: str              # DD/MM/YYYY
+    fecha: str                                  # DD/MM/YYYY
     max_pdfs: int | None = None
+    flujo: str = "seguimiento_pagos"            # nombre del flujo a ejecutar
 
 
 @router.post("/iniciar-libre")
@@ -290,10 +302,13 @@ def iniciar(req: IniciarRequest):
             "Cancelala antes de iniciar una nueva.",
         )
 
+    if req.flujo not in FLUJOS_DISPONIBLES:
+        raise HTTPException(400, f"Flujo desconocido: '{req.flujo}'. Disponibles: {FLUJOS_DISPONIBLES}")
+
     session = session_manager.crear("bbva")
     t = threading.Thread(
         target=_run_flow,
-        args=(session, req.fecha, req.max_pdfs),
+        args=(session, req.fecha, req.max_pdfs, req.flujo),
         daemon=True,
     )
     t.start()

@@ -267,8 +267,9 @@ export async function listarDocumentos() {
   return res.json()
 }
 
-export function urlDescargarTodos() {
-  return `${BASE}/documentos/descargar-todos`
+export function urlDescargarTodos(fecha = null) {
+  const base = `${BASE}/documentos/descargar-todos`
+  return fecha ? `${base}?fecha=${encodeURIComponent(fecha)}` : base
 }
 
 export function urlDescargarArchivo(filename) {

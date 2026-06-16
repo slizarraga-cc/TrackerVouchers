@@ -36,6 +36,12 @@ function formatFecha(timestamp) {
   })
 }
 
+/** Convierte 'YYYY-MM-DD' a 'DD/MM/YYYY' para mostrar al usuario. */
+function formatFechaChip(yyyymmdd) {
+  const [y, m, d] = yyyymmdd.split('-')
+  return `${d}/${m}/${y}`
+}
+
 function triggerDownload(url, filename) {
   const a = document.createElement('a')
   a.href = url
@@ -43,10 +49,48 @@ function triggerDownload(url, filename) {
   a.click()
 }
 
+function TablaArchivos({ archivos }) {
+  return (
+    <table className="tabla">
+      <thead>
+        <tr>
+          <th>Archivo</th>
+          <th>Tamaño</th>
+          <th>Descargado</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {archivos.map((doc) => (
+          <tr key={doc.nombre}>
+            <td className="tabla-cell-nombre">
+              <i className="fa-solid fa-file-pdf" style={{ color: '#E53E3E', marginRight: '8px' }} />
+              {doc.nombre}
+            </td>
+            <td className="tabla-cell-meta">{formatSize(doc.size)}</td>
+            <td className="tabla-cell-meta">{formatFecha(doc.modificado)}</td>
+            <td className="tabla-cell-action">
+              <button
+                className="btn-ghost"
+                style={{ padding: '5px 10px', fontSize: '12px' }}
+                onClick={() => triggerDownload(urlDescargarArchivo(doc.nombre), doc.nombre)}
+              >
+                <i className="fa-solid fa-download" />
+                Descargar
+              </button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 export function DocumentosPanel() {
-  const [docs,    setDocs]    = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState(null)
+  const [docs,        setDocs]        = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState(null)
+  const [fechaFiltro, setFechaFiltro] = useState(null) // null = Todas
 
   const cargar = useCallback(async () => {
     setLoading(true)
@@ -68,20 +112,32 @@ export function DocumentosPanel() {
     try {
       await eliminarTodosDocumentos()
       setDocs([])
+      setFechaFiltro(null)
     } catch (e) {
       setError(e.message)
     }
   }
 
+  // Fechas únicas disponibles (ordenadas)
+  const fechasDisponibles = [...new Set(docs.map(d => d.fecha))].sort()
+
+  // Docs filtrados por fecha seleccionada
+  const docsFiltrados = fechaFiltro
+    ? docs.filter(d => d.fecha === fechaFiltro)
+    : docs
+
   // Agrupar por banco
-  const grupos = docs.reduce((acc, doc) => {
-    const b = doc.banco
-    if (!acc[b]) acc[b] = []
-    acc[b].push(doc)
+  const grupos = docsFiltrados.reduce((acc, doc) => {
+    if (!acc[doc.banco]) acc[doc.banco] = []
+    acc[doc.banco].push(doc)
     return acc
   }, {})
 
-  const totalSize = docs.reduce((s, d) => s + d.size, 0)
+  const totalSize = docsFiltrados.reduce((s, d) => s + d.size, 0)
+
+  const nombreZip = fechaFiltro
+    ? `comprobantes_${formatFechaChip(fechaFiltro).replace(/\//g, '-')}.zip`
+    : 'comprobantes.zip'
 
   return (
     <>
@@ -92,9 +148,11 @@ export function DocumentosPanel() {
         <div className="hero-text">
           <h2>Documentos Descargados</h2>
           <p>
-            {docs.length > 0
-              ? `${docs.length} archivo(s) · ${formatSize(totalSize)} en total`
-              : 'No hay archivos descargados aún.'}
+            {docsFiltrados.length > 0
+              ? `${docsFiltrados.length} archivo(s) · ${formatSize(totalSize)} en total`
+              : docs.length > 0
+                ? 'Sin archivos para la fecha seleccionada.'
+                : 'No hay archivos descargados aún.'}
           </p>
         </div>
         <i className="fa-solid fa-folder-open hero-icon" />
@@ -107,8 +165,8 @@ export function DocumentosPanel() {
         <div className="card-body" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button
             className="btn-primary"
-            disabled={docs.length === 0}
-            onClick={() => triggerDownload(urlDescargarTodos(), 'comprobantes.zip')}
+            disabled={docsFiltrados.length === 0}
+            onClick={() => triggerDownload(urlDescargarTodos(fechaFiltro), nombreZip)}
           >
             <i className="fa-solid fa-download" />
             Descargar todo (ZIP)
@@ -127,6 +185,37 @@ export function DocumentosPanel() {
           </button>
         </div>
       </div>
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Filtro de fecha                                                   */}
+      {/* ---------------------------------------------------------------- */}
+      {fechasDisponibles.length > 0 && (
+        <div className="card">
+          <div className="card-body" style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', marginRight: '4px', whiteSpace: 'nowrap' }}>
+              <i className="fa-regular fa-calendar-days" style={{ marginRight: '6px' }} />
+              Filtrar por fecha:
+            </span>
+            <button
+              className={fechaFiltro === null ? 'btn-primary' : 'btn-ghost'}
+              style={{ padding: '4px 14px', fontSize: '13px' }}
+              onClick={() => setFechaFiltro(null)}
+            >
+              Todas
+            </button>
+            {fechasDisponibles.map(fecha => (
+              <button
+                key={fecha}
+                className={fechaFiltro === fecha ? 'btn-primary' : 'btn-ghost'}
+                style={{ padding: '4px 14px', fontSize: '13px' }}
+                onClick={() => setFechaFiltro(fecha)}
+              >
+                {formatFechaChip(fecha)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ---------------------------------------------------------------- */}
       {/* Loading                                                           */}
@@ -162,61 +251,64 @@ export function DocumentosPanel() {
       )}
 
       {/* ---------------------------------------------------------------- */}
-      {/* Tablas por banco                                                  */}
+      {/* Tablas por banco con subgrupos por fecha                          */}
       {/* ---------------------------------------------------------------- */}
-      {!loading && Object.entries(grupos).map(([banco, archivos]) => (
-        <div className="card" key={banco}>
-          <div className="card-header">
-            <div className="card-header-row">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <i className={`fa-solid ${BANK_ICONS[banco] ?? 'fa-file-pdf'}`}
-                   style={{ color: 'var(--blue-primary)', fontSize: '15px' }} />
-                <div>
-                  <div className="card-title">{BANK_LABELS[banco] ?? banco}</div>
-                  <div className="card-subtitle">
-                    {archivos.length} archivo(s) · {formatSize(archivos.reduce((s, d) => s + d.size, 0))}
+      {!loading && Object.entries(grupos).map(([banco, archivos]) => {
+        // Subgrupar por fecha dentro de este banco
+        const porFecha = archivos.reduce((acc, doc) => {
+          if (!acc[doc.fecha]) acc[doc.fecha] = []
+          acc[doc.fecha].push(doc)
+          return acc
+        }, {})
+        const fechasEnBanco = Object.keys(porFecha).sort()
+        // Mostrar subgrupos solo si hay más de una fecha (en vista "Todas")
+        const mostrarSubgrupos = fechaFiltro === null && fechasEnBanco.length > 1
+
+        return (
+          <div className="card" key={banco}>
+            <div className="card-header">
+              <div className="card-header-row">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <i className={`fa-solid ${BANK_ICONS[banco] ?? 'fa-file-pdf'}`}
+                     style={{ color: 'var(--blue-primary)', fontSize: '15px' }} />
+                  <div>
+                    <div className="card-title">{BANK_LABELS[banco] ?? banco}</div>
+                    <div className="card-subtitle">
+                      {archivos.length} archivo(s) · {formatSize(archivos.reduce((s, d) => s + d.size, 0))}
+                    </div>
                   </div>
                 </div>
+                <span className="pill pill-tipo">{banco}</span>
               </div>
-              <span className="pill pill-tipo">{banco}</span>
+            </div>
+            <div className="card-body" style={{ padding: '0 0 4px' }}>
+              {mostrarSubgrupos
+                ? fechasEnBanco.map(fecha => (
+                    <div key={fecha}>
+                      <div style={{
+                        padding: '7px 16px',
+                        fontSize: '12px',
+                        color: 'var(--text-secondary)',
+                        background: 'var(--bg-subtle, #f8f9fa)',
+                        borderTop: '1px solid var(--border)',
+                        borderBottom: '1px solid var(--border)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}>
+                        <i className="fa-regular fa-calendar" />
+                        {formatFechaChip(fecha)}
+                        <span style={{ opacity: 0.6 }}>— {porFecha[fecha].length} archivo(s)</span>
+                      </div>
+                      <TablaArchivos archivos={porFecha[fecha]} />
+                    </div>
+                  ))
+                : <TablaArchivos archivos={archivos} />
+              }
             </div>
           </div>
-          <div className="card-body" style={{ padding: '0 0 4px' }}>
-            <table className="tabla">
-              <thead>
-                <tr>
-                  <th>Archivo</th>
-                  <th>Tamaño</th>
-                  <th>Fecha</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {archivos.map((doc) => (
-                  <tr key={doc.nombre}>
-                    <td className="tabla-cell-nombre">
-                      <i className="fa-solid fa-file-pdf" style={{ color: '#E53E3E', marginRight: '8px' }} />
-                      {doc.nombre}
-                    </td>
-                    <td className="tabla-cell-meta">{formatSize(doc.size)}</td>
-                    <td className="tabla-cell-meta">{formatFecha(doc.modificado)}</td>
-                    <td className="tabla-cell-action">
-                      <button
-                        className="btn-ghost"
-                        style={{ padding: '5px 10px', fontSize: '12px' }}
-                        onClick={() => triggerDownload(urlDescargarArchivo(doc.nombre), doc.nombre)}
-                      >
-                        <i className="fa-solid fa-download" />
-                        Descargar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }

@@ -110,6 +110,68 @@ class BBVASelectors:
     # -------------------------------------------------------------------------
     BTN_EXPORTAR_PDF = 'a[title="Descargar Pdf"]'
 
+    # -------------------------------------------------------------------------
+    # FLUJO 2: Consulta de Operaciones
+    # Modulo: Cuentas > Movimientos de cuentas > Consulta de operaciones
+    # Ref: Informe de ejecucion 03/06/2026 — Relacion de Operaciones Realizadas
+    # Ref DOM: doms/cuentas.html | doms/consulta_operaciones.html
+    # -------------------------------------------------------------------------
+
+    # URL directa al modulo (SPA hash-based routing).
+    # Confirmada en doms/consulta_operaciones.html:
+    #   <!-- URL: .../index.html#!/legacy/000000314E -->
+    # Estrategia principal: navegar directo tras login para evitar shadow DOM del menu.
+    # Estabilidad: ALTA (ID de ruta legacy en el portal)
+    CONSULTA_OP_URL = (
+        'https://www.bbvanetcash.pe/nextgenempresas/portal/index.html'
+        '#!/legacy/000000314E'
+    )
+
+    # Senial de carga: legacy-page esta listo cuando tiene el atributo is-page-ready.
+    # Confirmado en DOM: <legacy-page id="cells-template-legacy" is-page-ready="" ...>
+    # Estabilidad: ALTA (patron identico a otros modulos legacy de BBVA)
+    LEGACY_PAGE = 'legacy-page#cells-template-legacy'
+
+    # Menu principal — "Cuentas" (fallback si URL directa no funciona).
+    # event-name confirmado: doms/cuentas.html URL contiene ?id=111V00002.
+    # Patron identico a MENU_PAGOS = event-111V00039 para "Pagos".
+    # Estabilidad: ALTA (event-name es identificador de negocio)
+    MENU_CUENTAS = 'bbva-web-navigation-menu-item[event-name="event-111V00002"]'
+    MENU_CUENTAS_TEXTO = "Cuentas"
+
+    # Sub-menu — "Consulta de operaciones" (fallback via menu)
+    # Ref: Cuentas > Movimientos de cuentas > Consulta de operaciones
+    # Estabilidad: ALTA (texto visible estable)
+    SUBMENU_CONSULTA_OP_TEXTO = "Consulta de operaciones"
+
+    # Tabla de Relacion de Operaciones (dentro de IFRAME_CENTRAL)
+    # Estructura HTML clasica — sin Web Components
+    # Estabilidad: ALTA (class funcional documentado)
+    TABLE_DATA     = 'table.tb_data'
+    TABLE_ROW_DATA = 'tr.even, tr.odd'   # filas alternas de datos
+
+    # Columnas de la tabla (0-based)
+    # | Tipo Operacion | Beneficiario | Fecha y Hora | Importe | Moneda | N° Op | N° Ref |
+    COL2_TIPO_OP    = 0
+    COL2_BENEFIC    = 1
+    COL2_FECHA_HORA = 2
+    COL2_IMPORTE    = 3
+    COL2_MONEDA     = 4
+    COL2_NRO_OP     = 5
+    COL2_NRO_REF    = 6
+
+    # Enlace en columna Tipo de Operacion
+    # Ref: <a class="enlace">TRANSF A CTAS DE TERCEROS</a>
+    # Estabilidad: ALTA (class funcional)
+    ENLACE_TIPO_OP = 'a.enlace'
+
+    # Boton Volver (parte inferior izquierda del detalle)
+    # Ref: <a class="bt_previous">Volver</a>
+    # Estabilidad: ALTA (class funcional)
+    BTN_VOLVER = 'a.bt_previous'
+
+    # BTN_EXPORTAR_PDF = 'a[title="Descargar Pdf"]'  — compartido con Flujo 1
+
     @staticmethod
     def btn_ver_detalle_por_orden(nro_orden: str) -> str:
         """
