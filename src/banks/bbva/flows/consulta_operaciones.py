@@ -76,35 +76,19 @@ class ConsultaOperaciones(BaseFlow):
 
     def _navegar_a_consulta(self) -> None:
         """
-        Navega a Consulta de Operaciones usando navegacion directa por URL (metodo primario)
-        o via clicks en el menu como fallback.
+        Navega a Cuentas > Consulta de operaciones via el sidebar.
 
-        Metodo primario — URL directa:
-          Navega a S.CONSULTA_OP_URL (hash-based SPA route) y espera
-          que legacy-page#cells-template-legacy tenga el atributo is-page-ready.
-          Confirmado en doms/consulta_operaciones.html:
-            URL: .../index.html#!/legacy/000000314E
-            DOM: <legacy-page id="cells-template-legacy" is-page-ready="" ...>
+        El sidebar (bbva-btge-sidebar-menu) siempre esta visible en el portal
+        BBVA Empresas independientemente del flujo anterior, por lo que la
+        navegacion via menu es el metodo mas confiable entre flujos de la misma
+        sesion.
 
-        Fallback — click en menu:
-          1. Click en item Cuentas: event-name="event-111V00002"
-             (confirmado por URL doms/cuentas.html: ?id=111V00002)
-          2. Click en "Consulta de operaciones" en la seccion menurization.
+        Nota: la URL directa (#!/legacy/000000314E) no es confiable cuando se
+        ejecuta despues de otro flujo porque legacy-page[is-page-ready] puede
+        ya estar en True desde el flujo anterior, haciendo que la espera retorne
+        antes de que la pagina nueva cargue realmente.
         """
         self.driver.switch_to.default_content()
-        logger.info("Navegando a Consulta de operaciones via URL directa...")
-        self.driver.get(S.CONSULTA_OP_URL)
-
-        # Esperar hasta 20s a que legacy-page este listo
-        if self._esperar_legacy_page_lista(timeout=20):
-            logger.info("Consulta de operaciones cargada via URL directa")
-            return
-
-        # Fallback: menu click si la URL directa no cargo el modulo
-        logger.warning(
-            "URL directa no cargo legacy-page. "
-            "Intentando navegacion via menu (Cuentas > Consulta de operaciones)..."
-        )
         self._navegar_via_menu()
 
     def _esperar_legacy_page_lista(self, timeout: int = 20) -> bool:
@@ -129,15 +113,21 @@ class ConsultaOperaciones(BaseFlow):
 
     def _navegar_via_menu(self) -> None:
         """
-        Fallback: navega a Consulta de Operaciones via clicks en el menu lateral.
+        Navega a Cuentas > Consulta de operaciones via el sidebar.
 
         Paso 1 — Click en "Cuentas":
-          Selector: bbva-web-navigation-menu-item[event-name="event-111V00002"]
-          event-name confirmado por URL doms/cuentas.html (?id=111V00002).
-          Usa click_js_shadow_menu_item (mismo patron que Flujo 1 con "event-111V00039").
+          Usa click_js_shadow_menu_item con event-name="event-111V00002"
+          (confirmado por URL doms/cuentas.html: ?id=111V00002).
+          Mismo patron que Flujo 1 usa "event-111V00039" para "Pagos".
 
-        Paso 2 — Click en "Consulta de operaciones":
-          Texto visible en el sub-menu de Cuentas tras expandir la seccion.
+        Paso 2 — Esperar iframe del sub-menu de Cuentas:
+          El sub-menu carga en iframe[src*="menurization-landing"] dentro del
+          shadow DOM del componente menurization. Se usa el mismo metodo
+          _click_submenu_en_window_frames que funciono en Flujo 1.
+
+        Paso 3 — Click en "Consulta de operaciones" dentro del iframe.
+
+        Paso 4 — Esperar que legacy-page cargue con is-page-ready.
         """
         self.driver.switch_to.default_content()
 
@@ -146,7 +136,6 @@ class ConsultaOperaciones(BaseFlow):
         logger.info(f"Click menu Cuentas resultado: {resultado}")
 
         if resultado == 'not-found':
-            # Fallback CSS directo (modo responsive o shadow abierto)
             if not self.click_js_css(S.MENU_CUENTAS):
                 if not self.click_js_shadow_css(S.MENU_CUENTAS):
                     raise RuntimeError(
@@ -155,46 +144,125 @@ class ConsultaOperaciones(BaseFlow):
                     )
             logger.info("Menu Cuentas clickeado via CSS (fallback)")
 
-        # Esperar que la seccion menurization cargue el sub-menu de Cuentas
+        # --- Paso 2: Esperar que la seccion menurization cargue ---
         SECTION_CSS = '#cells-template-bbva-btge-menurization-landing-solution'
         for _ in range(20):
             self.esperar(0.5)
             if self.elemento_presente_js(SECTION_CSS):
                 break
 
-        # Esperar a que los bbva-web-link del sub-menu aparezcan
+        # Esperar iframe del sub-menu dentro del shadow DOM de la seccion
+        logger.debug("Esperando iframe del sub-menu de Cuentas...")
         for _ in range(40):
             self.esperar(0.5)
-            links = self.driver.execute_script("""
+            iframe_listo = self.driver.execute_script("""
                 const sec = document.querySelector(arguments[0]);
-                if (!sec) return -1;
-                function findAll(root, tag) {
-                    let items = Array.from(root.querySelectorAll ? root.querySelectorAll(tag) : []);
-                    for (const el of (root.querySelectorAll ? root.querySelectorAll('*') : [])) {
-                        if (el.shadowRoot) items = items.concat(findAll(el.shadowRoot, tag));
+                if (!sec) return false;
+                function findIframe(root) {
+                    if (root.querySelectorAll) {
+                        const frames = root.querySelectorAll('iframe');
+                        if (frames.length) return true;
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot && findIframe(el.shadowRoot)) return true;
+                        }
                     }
-                    if (root.shadowRoot) items = items.concat(findAll(root.shadowRoot, tag));
-                    return items;
+                    if (root.shadowRoot && findIframe(root.shadowRoot)) return true;
+                    return false;
                 }
-                return findAll(sec, 'bbva-web-link').length;
+                return findIframe(sec);
             """, SECTION_CSS)
-            if links and links > 0:
+            if iframe_listo:
                 break
 
-        # --- Paso 2: Click en "Consulta de operaciones" ---
-        # Intento 1: shadow DOM traversal desde document root
-        if self.click_js_shadow_link(S.SUBMENU_CONSULTA_OP_TEXTO):
-            logger.info("'Consulta de operaciones' clickeado via shadow DOM traversal")
+        # --- Paso 3: Click en "Consulta de operaciones" ---
+        # Intento 1: iframe en shadow DOM (mismo metodo que funciono en Flujo 1)
+        if self._click_submenu_en_shadow_iframe(S.SUBMENU_CONSULTA_OP_TEXTO):
+            logger.info("'Consulta de operaciones' clickeado via shadow iframe")
         else:
-            # Intento 2: dentro del iframe menurization
-            self._click_en_iframe_menurization(S.SUBMENU_CONSULTA_OP_TEXTO)
+            # Intento 2: shadow DOM traversal desde document root
+            if self.click_js_shadow_link(S.SUBMENU_CONSULTA_OP_TEXTO):
+                logger.info("'Consulta de operaciones' clickeado via shadow DOM traversal")
+            else:
+                # Intento 3: iframe menurization accesible por CSS
+                self._click_en_iframe_menurization(S.SUBMENU_CONSULTA_OP_TEXTO)
 
+        # --- Paso 4: Esperar carga de legacy-page ---
         if not self._esperar_legacy_page_lista(timeout=15):
             raise RuntimeError(
                 "legacy-page no cargo tras click en 'Consulta de operaciones'. "
                 "Verifica que el sub-menu de Cuentas este visible."
             )
         logger.info("Consulta de operaciones cargada via menu")
+
+    def _click_submenu_en_shadow_iframe(self, texto: str) -> bool:
+        """
+        Busca el iframe del sub-menu dentro del shadow DOM de la seccion menurization,
+        hace switch_to.frame y luego click por texto. Mismo patron que
+        SeguimientoPagosMasivos._click_submenu_en_window_frames que funciono en Flujo 1.
+        """
+        try:
+            iframe_el = self.driver.execute_script("""
+                function findIframe(root) {
+                    if (root.querySelectorAll) {
+                        const frames = root.querySelectorAll('iframe');
+                        if (frames.length) return frames[0];
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot) {
+                                const f = findIframe(el.shadowRoot);
+                                if (f) return f;
+                            }
+                        }
+                    }
+                    if (root.shadowRoot) {
+                        const f = findIframe(root.shadowRoot);
+                        if (f) return f;
+                    }
+                    return null;
+                }
+                const sec = document.querySelector('#cells-template-bbva-btge-menurization-landing-solution');
+                return sec ? findIframe(sec) : null;
+            """)
+
+            if not iframe_el:
+                logger.debug("[SubMenu] No se encontro iframe en shadow DOM de menurization")
+                return False
+
+            self.driver.switch_to.frame(iframe_el)
+            self.esperar(2)
+
+            resultado = self.driver.execute_script("""
+                const texto = arguments[0];
+                function buscar(root) {
+                    for (const tag of ['bbva-web-link', 'a', 'li', 'span']) {
+                        for (const el of (root.querySelectorAll ? root.querySelectorAll(tag) : [])) {
+                            if (el.textContent.trim().includes(texto)) {
+                                el.click();
+                                return 'clicked:' + el.tagName + ' | text=' + el.textContent.trim().slice(0, 60);
+                            }
+                        }
+                    }
+                    for (const el of (root.querySelectorAll ? root.querySelectorAll('*') : [])) {
+                        if (el.shadowRoot) {
+                            const r = buscar(el.shadowRoot);
+                            if (r) return r;
+                        }
+                    }
+                    return null;
+                }
+                return buscar(document);
+            """, texto)
+
+            logger.debug(f"[SubMenu] Click resultado: {resultado}")
+            return bool(resultado)
+
+        except Exception as e:
+            logger.warning(f"[SubMenu] Error en shadow iframe: {e}")
+            return False
+        finally:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
 
     def _click_en_iframe_menurization(self, texto: str) -> None:
         """Busca y hace click en un item de sub-menu dentro del iframe menurization."""
