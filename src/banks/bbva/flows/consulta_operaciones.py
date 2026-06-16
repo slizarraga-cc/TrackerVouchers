@@ -191,7 +191,61 @@ class ConsultaOperaciones(BaseFlow):
                 "legacy-page no cargo tras click en 'Consulta de operaciones'. "
                 "Verifica que el sub-menu de Cuentas este visible."
             )
+
+        # --- Paso 5: Verificar que el iframe SPEKYOP cargó la pagina correcta ---
+        # Es posible que legacy-page[is-page-ready] se mantenga de Flujo 1 y el
+        # iframe SPEKYOP todavia tenga contenido de Seguimiento de Pagos Masivos.
+        # Verificamos que el h2 del titulo diga "Consulta de Operaciones".
+        logger.debug("Verificando contenido del iframe SPEKYOP...")
+        if not self._verificar_pagina_consulta(timeout=20):
+            raise RuntimeError(
+                "El iframe SPEKYOP no cargó 'Consulta de Operaciones'. "
+                "El contenido sigue mostrando la pagina anterior."
+            )
         logger.info("Consulta de operaciones cargada via menu")
+
+    def _verificar_pagina_consulta(self, timeout: int = 20) -> bool:
+        """
+        Verifica que el iframe SPEKYOP haya cargado realmente la pagina
+        'Consulta de Operaciones' comprobando el h2 del titulo.
+
+        Necesario porque legacy-page[is-page-ready] puede mantenerse True
+        desde Flujo 1 mientras el iframe SPEKYOP todavia muestra contenido
+        del Seguimiento de Pagos Masivos.
+
+        Ref: dom_tabla.html — <div class='page_title_h'><h2>Consulta de Operaciones</h2>
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                self.driver.switch_to.default_content()
+                legacy_el = self._find_iframe_in_shadow('SPEKYOP', timeout=5)
+                if not legacy_el:
+                    time.sleep(1)
+                    continue
+                self.driver.switch_to.frame(legacy_el)
+                central_els = self.driver.find_elements(By.CSS_SELECTOR, S.IFRAME_CENTRAL)
+                if not central_els:
+                    self.driver.switch_to.default_content()
+                    time.sleep(1)
+                    continue
+                self.driver.switch_to.frame(central_els[0])
+                h2_els = self.driver.find_elements(By.CSS_SELECTOR, '.page_title_h h2')
+                if h2_els:
+                    texto_h2 = h2_els[0].text.strip()
+                    logger.debug(f"[verificar] h2='{texto_h2}'")
+                    if 'Consulta' in texto_h2:
+                        self.driver.switch_to.default_content()
+                        return True
+            except Exception as e:
+                logger.debug(f"[verificar] {e}")
+            finally:
+                try:
+                    self.driver.switch_to.default_content()
+                except Exception:
+                    pass
+            time.sleep(1)
+        return False
 
     def _click_submenu_en_shadow_iframe(self, texto: str) -> bool:
         """
