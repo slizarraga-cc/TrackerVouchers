@@ -129,10 +129,11 @@ class ConsultaOperaciones(BaseFlow):
         Paso 4 — Esperar que legacy-page cargue con is-page-ready.
         """
         self.driver.switch_to.default_content()
+        logger.debug(f"[NAV] URL inicial: {self.driver.current_url}")
 
         # --- Paso 1: Click en Cuentas ---
         resultado = self.click_js_shadow_menu_item("event-111V00002")
-        logger.info(f"Click menu Cuentas resultado: {resultado}")
+        logger.info(f"[NAV P1] Click menu Cuentas resultado: {resultado}")
 
         if resultado == 'not-found':
             if not self.click_js_css(S.MENU_CUENTAS):
@@ -141,49 +142,93 @@ class ConsultaOperaciones(BaseFlow):
                         "No se pudo hacer click en menu Cuentas. "
                         f"Selector: {S.MENU_CUENTAS}"
                     )
-            logger.info("Menu Cuentas clickeado via CSS (fallback)")
+            logger.info("[NAV P1] Menu Cuentas clickeado via CSS (fallback)")
 
         # --- Paso 2: Esperar que la seccion menurization cargue ---
         SECTION_CSS = '#cells-template-bbva-btge-menurization-landing-solution'
+        seccion_presente = False
         for _ in range(20):
             self.esperar(0.5)
             if self.elemento_presente_js(SECTION_CSS):
+                seccion_presente = True
                 break
+        logger.debug(f"[NAV P2] Seccion menurization presente: {seccion_presente}")
 
-        # Esperar iframe del sub-menu dentro del shadow DOM de la seccion
-        logger.debug("Esperando iframe del sub-menu de Cuentas...")
-        for _ in range(40):
-            self.esperar(0.5)
-            iframe_listo = self.driver.execute_script("""
-                const sec = document.querySelector(arguments[0]);
-                if (!sec) return false;
-                function findIframe(root) {
-                    if (root.querySelectorAll) {
-                        const frames = root.querySelectorAll('iframe');
-                        if (frames.length) return true;
-                        for (const el of root.querySelectorAll('*')) {
-                            if (el.shadowRoot && findIframe(el.shadowRoot)) return true;
+        # Loguear contenido de todos los iframes en la seccion para diagnostico
+        info_iframes = self.driver.execute_script("""
+            const sec = document.querySelector(arguments[0]);
+            if (!sec) return [{error: 'seccion no encontrada'}];
+            const result = [];
+            function scanIframes(root, depth) {
+                if (root.querySelectorAll) {
+                    for (const f of root.querySelectorAll('iframe')) {
+                        try {
+                            const doc = f.contentDocument || f.contentWindow.document;
+                            const body = doc && doc.body ? doc.body.innerText.slice(0, 300) : '(sin acceso)';
+                            result.push({depth, src: f.src.slice(0, 80), text: body.replace(/\\s+/g, ' ').trim()});
+                        } catch(e) {
+                            result.push({depth, src: f.src.slice(0, 80), text: '(cross-origin: ' + e.message + ')'});
                         }
                     }
-                    if (root.shadowRoot && findIframe(root.shadowRoot)) return true;
+                    for (const el of root.querySelectorAll('*')) {
+                        if (el.shadowRoot) scanIframes(el.shadowRoot, depth + 1);
+                    }
+                }
+                if (root.shadowRoot) scanIframes(root.shadowRoot, depth + 1);
+            }
+            scanIframes(sec, 0);
+            return result;
+        """, SECTION_CSS)
+        for idx, info in enumerate(info_iframes[:5]):
+            logger.debug(f"[NAV P2] iframe[{idx}] depth={info.get('depth')} src={info.get('src')!r} | texto={info.get('text', '')[:120]!r}")
+
+        # Esperar que el iframe del sub-menu de CUENTAS contenga "Consulta de operaciones".
+        # Problema conocido: el iframe del submenu de Pagos (Flujo 1) puede seguir
+        # presente; el JS lee el contentDocument para distinguirlos.
+        logger.debug("[NAV P2] Esperando iframe de Cuentas con 'Consulta de operaciones'...")
+        submenu_listo = False
+        for intento in range(60):
+            self.esperar(0.5)
+            submenu_listo = self.driver.execute_script("""
+                const sec = document.querySelector(arguments[0]);
+                if (!sec) return false;
+                function findIframeWithText(root, texto) {
+                    if (root.querySelectorAll) {
+                        for (const f of root.querySelectorAll('iframe')) {
+                            try {
+                                const doc = f.contentDocument || f.contentWindow.document;
+                                if (doc && doc.body && doc.body.innerText.includes(texto)) return true;
+                            } catch(e) {}
+                        }
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot && findIframeWithText(el.shadowRoot, texto)) return true;
+                        }
+                    }
+                    if (root.shadowRoot && findIframeWithText(root.shadowRoot, texto)) return true;
                     return false;
                 }
-                return findIframe(sec);
+                return findIframeWithText(sec, 'Consulta de operaciones');
             """, SECTION_CSS)
-            if iframe_listo:
+            if submenu_listo:
+                logger.info(f"[NAV P2] Iframe de Cuentas listo en intento {intento + 1}")
                 break
+            if intento % 10 == 9:
+                logger.debug(f"[NAV P2] Aun esperando iframe de Cuentas... ({(intento+1)*0.5:.0f}s)")
+
+        if not submenu_listo:
+            logger.warning("[NAV P2] No se detecto 'Consulta de operaciones' en el iframe — intentando de todas formas")
 
         # --- Paso 3: Click en "Consulta de operaciones" ---
-        # Intento 1: iframe en shadow DOM (mismo metodo que funciono en Flujo 1)
+        logger.debug("[NAV P3] Intentando click en 'Consulta de operaciones'...")
         if self._click_submenu_en_shadow_iframe(S.SUBMENU_CONSULTA_OP_TEXTO):
-            logger.info("'Consulta de operaciones' clickeado via shadow iframe")
+            logger.info("[NAV P3] 'Consulta de operaciones' clickeado via shadow iframe")
         else:
-            # Intento 2: shadow DOM traversal desde document root
             if self.click_js_shadow_link(S.SUBMENU_CONSULTA_OP_TEXTO):
-                logger.info("'Consulta de operaciones' clickeado via shadow DOM traversal")
+                logger.info("[NAV P3] 'Consulta de operaciones' clickeado via shadow DOM traversal")
             else:
-                # Intento 3: iframe menurization accesible por CSS
                 self._click_en_iframe_menurization(S.SUBMENU_CONSULTA_OP_TEXTO)
+
+        logger.debug(f"[NAV P3] URL post-click: {self.driver.current_url}")
 
         # --- Paso 4: Esperar carga de legacy-page ---
         if not self._esperar_legacy_page_lista(timeout=15):
@@ -191,18 +236,18 @@ class ConsultaOperaciones(BaseFlow):
                 "legacy-page no cargo tras click en 'Consulta de operaciones'. "
                 "Verifica que el sub-menu de Cuentas este visible."
             )
+        logger.debug(f"[NAV P4] legacy-page ready | URL: {self.driver.current_url}")
 
         # --- Paso 5: Verificar que el iframe SPEKYOP cargó la pagina correcta ---
-        # Es posible que legacy-page[is-page-ready] se mantenga de Flujo 1 y el
-        # iframe SPEKYOP todavia tenga contenido de Seguimiento de Pagos Masivos.
-        # Verificamos que el h2 del titulo diga "Consulta de Operaciones".
-        logger.debug("Verificando contenido del iframe SPEKYOP...")
+        # "Consulta de operaciones" debe mostrar la pagina de transferencias individuales,
+        # NO "Consulta de Pagos Masivos" (que es la pagina de Flujo 1 / batch payments).
+        logger.debug("[NAV P5] Verificando h2 del iframe SPEKYOP...")
         if not self._verificar_pagina_consulta(timeout=20):
             raise RuntimeError(
-                "El iframe SPEKYOP no cargó 'Consulta de Operaciones'. "
-                "El contenido sigue mostrando la pagina anterior."
+                "El iframe SPEKYOP muestra la pagina incorrecta. "
+                "Revisa [NAV P2] en los logs para ver que iframe fue encontrado."
             )
-        logger.info("Consulta de operaciones cargada via menu")
+        logger.info("[NAV P5] Pagina correcta verificada — Consulta de operaciones cargada")
 
     def _verificar_pagina_consulta(self, timeout: int = 20) -> bool:
         """
@@ -234,7 +279,9 @@ class ConsultaOperaciones(BaseFlow):
                 if h2_els:
                     texto_h2 = h2_els[0].text.strip()
                     logger.debug(f"[verificar] h2='{texto_h2}'")
-                    if 'Consulta' in texto_h2:
+                    # Verificacion exacta: debe decir "Consulta de Operaciones",
+                    # NO "Consulta de Pagos Masivos" (pagina de Flujo 1)
+                    if 'Operaciones' in texto_h2 and 'Pagos' not in texto_h2:
                         self.driver.switch_to.default_content()
                         return True
             except Exception as e:
