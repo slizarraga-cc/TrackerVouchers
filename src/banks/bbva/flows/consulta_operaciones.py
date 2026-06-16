@@ -317,9 +317,16 @@ class ConsultaOperaciones(BaseFlow):
             EC.presence_of_element_located((By.CSS_SELECTOR, S.TABLE_DATA))
         )
 
-        filas = self.driver.find_elements(By.CSS_SELECTOR, S.TABLE_ROW_DATA)
+        # Usar selector amplio para no perder filas por clase incorrecta
+        filas = self.driver.find_elements(By.CSS_SELECTOR, 'table.tb_data tr')
         operaciones: List[Operacion] = []
         bloque_activo = False
+
+        # Diagnostico: loguear primeras 5 filas para verificar estructura real
+        for i, fila in enumerate(filas[:5]):
+            celdas_diag = fila.find_elements(By.TAG_NAME, 'td')
+            valores = [c.text.strip()[:30] for c in celdas_diag]
+            logger.debug(f"[DIAG fila {i}] class={fila.get_attribute('class')!r} | celdas={len(celdas_diag)} | valores={valores}")
 
         for fila in filas:
             celdas = fila.find_elements(By.TAG_NAME, 'td')
