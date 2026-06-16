@@ -148,10 +148,7 @@ def _run_libre(session: Session):
             session.driver = None
 
 
-FLUJOS_DISPONIBLES = ["seguimiento_pagos", "consulta_operaciones"]
-
-
-def _run_flow(session: Session, fecha: str, max_pdfs, flujo: str):
+def _run_flow(session: Session, fecha: str, max_pdfs):
     thread_id = threading.current_thread().ident
     with _ts_lock:
         _thread_sessions[thread_id] = session
@@ -185,12 +182,6 @@ def _run_flow(session: Session, fecha: str, max_pdfs, flujo: str):
         logger.info("Navegando a la pagina de login BBVA...")
         driver.get(S.LOGIN_URL)
 
-        pdfs_previos: set = set()
-        try:
-            pdfs_previos = {f for f in os.listdir(DOWNLOADS_PATH) if f.lower().endswith('.pdf')}
-        except Exception:
-            pass
-
         session.status = SessionStatus.ESPERANDO_LOGIN
         logger.info(
             "Pagina de login abierta. "
@@ -218,20 +209,31 @@ def _run_flow(session: Session, fecha: str, max_pdfs, flujo: str):
 
         session.status = SessionStatus.EJECUTANDO
 
-        if flujo == "seguimiento_pagos":
-            logger.info("Login confirmado. Iniciando seguimiento de pagos masivos...")
-            flow = SeguimientoPagosMasivos(driver, downloads_path=DOWNLOADS_PATH)
-            descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
-        elif flujo == "consulta_operaciones":
-            logger.info("Login confirmado. Iniciando consulta de operaciones...")
-            flow = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH)
-            descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
-        else:
-            raise ValueError(f"Flujo desconocido: '{flujo}'. Disponibles: {FLUJOS_DISPONIBLES}")
+        # --- Flujo 1: Seguimiento de Pagos Masivos ---
+        logger.info("=== FLUJO 1: Seguimiento de Pagos Masivos ===")
+        flow1 = SeguimientoPagosMasivos(driver, downloads_path=DOWNLOADS_PATH)
+        desc1 = flow1.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
+        logger.success(f"Flujo 1 completado: {desc1} PDF(s)")
 
-        session.resultado = descargados
+        if session.cancel_event.is_set():
+            session.status = SessionStatus.CANCELADO
+            logger.info("Sesion cancelada antes del Flujo 2.")
+            return
+
+        # --- Flujo 2: Consulta de Operaciones ---
+        logger.info("=== FLUJO 2: Consulta de Operaciones ===")
+        driver.switch_to.default_content()
+        flow2 = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH)
+        desc2 = flow2.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
+        logger.success(f"Flujo 2 completado: {desc2} PDF(s)")
+
+        session.resultado = {
+            "seguimiento_pagos": desc1,
+            "consulta_operaciones": desc2,
+            "total": desc1 + desc2,
+        }
         session.status = SessionStatus.COMPLETADO
-        logger.success(f"Completado: {descargados} PDF(s) descargados.")
+        logger.success(f"Ambos flujos completados: {desc1 + desc2} PDF(s) en total.")
 
     except Exception as e:
         session.status = SessionStatus.LIBRE
@@ -271,9 +273,8 @@ def sesion_activa():
 
 
 class IniciarRequest(BaseModel):
-    fecha: str                                  # DD/MM/YYYY
+    fecha: str              # DD/MM/YYYY
     max_pdfs: int | None = None
-    flujo: str = "seguimiento_pagos"            # nombre del flujo a ejecutar
 
 
 @router.post("/iniciar-libre")
@@ -302,13 +303,10 @@ def iniciar(req: IniciarRequest):
             "Cancelala antes de iniciar una nueva.",
         )
 
-    if req.flujo not in FLUJOS_DISPONIBLES:
-        raise HTTPException(400, f"Flujo desconocido: '{req.flujo}'. Disponibles: {FLUJOS_DISPONIBLES}")
-
     session = session_manager.crear("bbva")
     t = threading.Thread(
         target=_run_flow,
-        args=(session, req.fecha, req.max_pdfs, req.flujo),
+        args=(session, req.fecha, req.max_pdfs),
         daemon=True,
     )
     t.start()

@@ -34,7 +34,7 @@ function toDisplayDate(htmlDate) {
 const STATUS_LABELS = {
   iniciando:        'Conectando al navegador...',
   esperando_login:  'Esperando login manual',
-  ejecutando:       'Descargando pagos masivos...',
+  ejecutando:       'Ejecutando flujos BBVA...',
   completado:       'Completado',
   error:            'Error',
   cancelado:        'Cancelado',
@@ -186,8 +186,8 @@ export function BBVAPanel() {
       {!status && (
         <div className="bank-hero">
           <div className="hero-text">
-            <h2>Seguimiento de Pagos Masivos</h2>
-            <p>Selecciona la fecha y el bot descargará los PDFs<br />desde el portal BBVA Net Cash.</p>
+            <h2>Descarga BBVA Net Cash</h2>
+            <p>Selecciona la fecha y el bot ejecutará ambos flujos:<br />Pagos masivos y Consulta de operaciones.</p>
           </div>
           <i className="fa-solid fa-file-arrow-down hero-icon" />
         </div>
@@ -388,9 +388,14 @@ export function BBVAPanel() {
           <div className="result-content">
             <div className="result-title">Descarga finalizada</div>
             <div className="result-detail">
-              {resultado !== null
-                ? `${resultado} PDF(s) descargados correctamente.`
-                : 'Proceso completado.'}
+              {resultado !== null ? (
+                typeof resultado === 'object' ? (
+                  <>
+                    <div>Pagos masivos: <strong>{resultado.seguimiento_pagos}</strong> PDF(s)</div>
+                    <div>Consulta de ops.: <strong>{resultado.consulta_operaciones}</strong> PDF(s)</div>
+                  </>
+                ) : `${resultado} PDF(s) descargados.`
+              ) : 'Proceso completado.'}
             </div>
             <div className="result-actions">
               <button className="btn-primary" onClick={reset}>
