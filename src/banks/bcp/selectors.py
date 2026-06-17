@@ -78,6 +78,9 @@ class BCPSelectors:
     # Estabilidad: MEDIA
     # -------------------------------------------------------------------------
     BTN_DESCARGAR_PDF_GENERIC = '//button[contains(normalize-space(.), "Descargar PDF")]'
+    # Pago de servicios usa "Descargar detalle" en vez de "Descargar PDF"
+    # Confirmado en doms/pago_servicios.html: bcp-button-1wdaaa > button
+    BTN_DESCARGAR_DETALLE = '//button[contains(normalize-space(.), "Descargar detalle")]'
     BTN_VOLVER_GENERIC = '//a[contains(normalize-space(.), "Volver")]'
 
     # -------------------------------------------------------------------------
@@ -119,7 +122,14 @@ class BCPSelectors:
     #     Confirmado en: flujos previos funcionales.
     MONTO_POR_TIPO: dict = {
         'tipo de cambio': (
-            '//div[normalize-space()="Monto cambiado"]/following-sibling::div[1]'
+            # Confirmado en doms/tipo_cambio.html.
+            # Tipo exacto: "Tipo de cambio"
+            # Estructura: div.col-static > bcp-paragraph > p " Monto cambiado "
+            #             sibling div.col.pl-0 > field-value > ... > span (ej: "$ 40,000.00")
+            # Fecha: "Fecha de proceso" (cubierto por FECHA_LABELS)
+            # PDF: bcp-button-ntlc-commons-widgets -> BTN_DESCARGAR_PDF_TRANSFER
+            '//div[contains(@class,"col-static")][.//p[normalize-space()="Monto cambiado"]]'
+            '/following-sibling::div[contains(@class,"col")]'
         ),
         'transferencias a cuentas de terceros bcp local': (
             # Label " Monto " en div.col-static > p; valor en sibling div.col.pl-0 > ... > h3
@@ -127,21 +137,78 @@ class BCPSelectors:
             '/following-sibling::div[contains(@class,"col")]'
         ),
         'transferencia a otros bancos locales - diferida': (
-            '//div[normalize-space()="Monto transferido"]/following-sibling::div[1]'
+            # Confirmado en doms/otros_bancos_diferida.html.
+            # Tipo exacto: "Transferencia a otros bancos locales - Diferida"
+            # Estructura: div.col-static > bcp-paragraph > p " Monto transferido "
+            #             sibling div.col.pl-0 > field-value > ntlc-atomic-amount > h3 (ej: "S/ 61,015.09")
+            # Fecha: "Fecha de proceso" (cubierto por FECHA_LABELS)
+            # PDF: <bcp-button> (no ntlc-commons-widgets) -> capturado por BTN_DESCARGAR_PDF_GENERIC
+            '//div[contains(@class,"col-static")][.//p[normalize-space()="Monto transferido"]]'
+            '/following-sibling::div[contains(@class,"col")]'
         ),
         'pago de servicios': (
+            # Confirmado en doms/pago_servicios.html.
+            # Tipo exacto: "Pago de servicios"
+            # Estructura: div.col.property > bcp-paragraph-1wdaaa > p "Monto a pagar"
+            #             sibling div.col > bcp-title-1wdaaa > h3 (ej: " S/ 76.00 ")
+            # Fecha: "Fecha de proceso" (cubierto por FECHA_LABELS)
+            # PDF: bcp-button-1wdaaa con texto "Descargar detalle" -> BTN_DESCARGAR_DETALLE
             '//div[normalize-space()="Monto a pagar"]/following-sibling::div[1]'
         ),
         'pago masivo a proveedores': (
-            # "Monto" puede existir en multiples secciones; acotado al que sigue a "Datos de la planilla"
-            '//div[normalize-space()="Datos de la planilla"]'
-            '/following::div[normalize-space()="Monto"][1]/following-sibling::div[1]'
+            # Confirmado en doms/pago_masivo_proveedores.html.
+            # Tipo exacto: "Pago masivo a proveedores"
+            # Estructura: dentro de seccion "Datos de la planilla" (encabezado en <p>, no <div>)
+            #             div.col-static > bcp-paragraph > p " Monto "
+            #             sibling div.col.pl-0 > text-value > ... > span (ej: "S/ 23,510.72")
+            # Ancla por <p> "Datos de la planilla" para evitar colision si aparece otro label "Monto"
+            # Fecha: "Fecha de pago" (cubierto por FECHA_LABELS)
+            # PDF: bcp-button-9zdaaa -> capturado por BTN_DESCARGAR_PDF_GENERIC
+            '//p[normalize-space()="Datos de la planilla"]'
+            '/following::div[contains(@class,"col-static")][.//p[normalize-space()="Monto"]][1]'
+            '/following-sibling::div[contains(@class,"col")]'
         ),
         'transferencia a otros bancos del exterior': (
-            '//div[normalize-space()="Monto total"]/following-sibling::div[1]'
+            # Confirmado en doms/transferencia_otros_bancos_exterior.html.
+            # Tipo exacto: "Transferencia a otros bancos del exterior"
+            # Estructura: div.col-static > bcp-paragraph-ntlc-commons-widgets > p " Monto total "
+            #             sibling div.col.pl-0 > field-value > ntlc-atomic-amount > h3 (ej: "$ 187,705.00")
+            #             OJO: el div.col.pl-0 tambien tiene un <p> subtitulo; apuntar al h3 para evitar texto extra.
+            # Fecha: "Fecha de proceso" (cubierto por FECHA_LABELS)
+            # PDF: bcp-button-ntlc-commons-widgets -> BTN_DESCARGAR_PDF_TRANSFER
+            '//div[contains(@class,"col-static")][.//p[normalize-space()="Monto total"]]'
+            '/following-sibling::div[contains(@class,"col")]'
+            '//ntlc-atomic-amount//h3'
+        ),
+        'autodesembolso - pago': (
+            # Confirmado en doms/autodesembolso_pago.html.
+            # Tipo exacto: "Autodesembolso - Pago"
+            # Estructura: div.col-md-4 > bcp-paragraph-fiec-payment-detail > p " Monto a pagar "
+            #             sibling div.col-md-8 > bcp-title-fiec-payment-detail > h3 (ej: " $ 300,155.13 ")
+            # Fecha: "Fecha de envío" (cubierto por FECHA_LABELS)
+            # PDF: sin boton — solo CDP print (ver _descargar_pdf)
+            # IMPORTANTE: debe ir ANTES de 'autodesembolso' para ganar el match sobre financiamiento
+            '//div[contains(@class,"col-md-4")][.//p[normalize-space()="Monto a pagar"]]'
+            '/following-sibling::div[contains(@class,"col-md-8")]'
+        ),
+        'autodesembolso': (
+            # Confirmado en doms/autodesembolso_financiamiento.html.
+            # Tipo exacto: "Autodesembolso - Financiamiento"
+            # Estructura: div.col-md-4 > bcp-paragraph-fec-operation-detail > p " Capital "
+            #             sibling div.col-md-8 > bcp-paragraph-fec-operation-detail > p " S/ 600,000.00 "
+            # Fecha: "Fecha de envío" (cubierto por FECHA_LABELS)
+            # PDF: fec-button-export-pdf -> BTN_DESCARGAR_PDF_FEC
+            # ESPECIAL: ademas del boton PDF, tambien se hace print CDP de pantalla (ver _procesar_operaciones)
+            '//div[contains(@class,"col-md-4")][.//p[normalize-space()="Capital"]]'
+            '/following-sibling::div[contains(@class,"col-md-8")]'
         ),
         'cheques': (
-            # Label "Monto" en ldd-title > p; valor en ldd-subtitle-container > h3
+            # Confirmado en doms/cheques.html.
+            # Tipo exacto: "CHEQUES"
+            # Estructura: ldd-container > ldd-title > bcp-paragraph-y0daaa > p "Monto"
+            #             sibling ldd-subtitle-container > bcp-title-y0daaa > h3 (ej: "S/ 14,208.29")
+            # Fecha: "Fecha de pago" (cubierto por FECHA_LABELS)
+            # PDF: sin boton — solo CDP print via "cheque" in tipo (ver _descargar_pdf)
             '//p[normalize-space()="Monto"]'
             '/ancestor::div[contains(@class,"ldd-container")]'
             '/div[contains(@class,"ldd-subtitle-container")]'
@@ -159,6 +226,7 @@ class BCPSelectors:
         "Fecha",
         "Fecha de solicitud",
         "Fecha de pago",
+        "Fecha de envío",        # Autodesembolso - Financiamiento (doms/autodesembolso_financiamiento.html)
         "Fecha valor",
         "Fecha de acreditamiento",
         "Fecha de ejecución",

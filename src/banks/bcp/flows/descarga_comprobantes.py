@@ -7,6 +7,7 @@ Referencias de selectores: manual_componentes.md + Prueba1.md
 
 import base64
 import os
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -301,6 +302,23 @@ class DescargaComprobantes(BaseFlow):
             logger.warning(f"[{codigo}] No se pudo leer monto para tipo '{tipo}': {e}")
             return "", tipo
 
+    def _limpiar_fecha(self, fecha_raw: str) -> str:
+        """
+        Extrae la parte de fecha de un texto raw y la convierte a YYYY-MM-DD.
+
+        Ejemplos de entrada:
+          "22/05/2026 - 12:28 a.m."  → "2026-05-22"
+          "16/06/2026"               → "2026-06-16"
+          "12/06/2026 - 06:42 PM"   → "2026-06-12"
+
+        Retorna cadena vacia si no se puede parsear.
+        """
+        m = re.search(r'(\d{2})/(\d{2})/(\d{4})', fecha_raw)
+        if not m:
+            return ""
+        dia, mes, anio = m.group(1), m.group(2), m.group(3)
+        return f"{anio}-{mes}-{dia}"
+
     def _extraer_fecha(self, codigo: str) -> str:
         """
         Intenta extraer la fecha de operacion del detalle abierto.
@@ -348,17 +366,32 @@ class DescargaComprobantes(BaseFlow):
         except Exception:
             return set()
 
-    def _renombrar_pdf_nuevo(self, pdfs_antes: set, monto: str, indice: int) -> None:
+    def _carpeta_fecha(self, fecha: str) -> str:
         """
-        Espera hasta 30s a que aparezca un PDF nuevo y lo renombra.
+        Retorna (y crea si no existe) el subdirectorio downloads_path/YYYY-MM-DD/.
+        Si fecha esta vacio usa 'sin-fecha' como nombre de carpeta.
+        """
+        nombre = fecha if fecha else "sin-fecha"
+        ruta = os.path.join(self._downloads_path, nombre)
+        os.makedirs(ruta, exist_ok=True)
+        return ruta
 
-        Formato: '<monto_limpio> BCP.pdf'
-          - monto_limpio: solo digitos, comas y puntos (sin simbolos de moneda).
-            Ejemplo: 'S/ 27,638.20' → '27,638.20'  |  '$ 40,000.00' → '40,000.00'
-          - Si monto esta vacio, usa '<indice> BCP.pdf' como fallback.
+    def _renombrar_pdf_nuevo(self, pdfs_antes: set, monto: str, indice: int, fecha: str = "") -> None:
+        """
+        Espera hasta 30s a que aparezca un PDF nuevo en downloads_path,
+        lo renombra y lo mueve al subdirectorio de fecha correspondiente.
 
-        Colisiones: si ya existe un archivo con el mismo nombre base, se agrega
-        un contador: '27,638.20 BCP 2.pdf', '27,638.20 BCP 3.pdf', etc.
+        Estructura resultante:
+          downloads_path/
+            YYYY-MM-DD/
+              27,638.20 BCP.pdf
+              14,208.29 BCP.pdf
+
+        Nombre del archivo:
+          - '<monto_limpio> BCP.pdf'  (la fecha ya esta en la carpeta, no en el nombre)
+          - Fallback si monto vacio: '<indice> BCP.pdf'
+
+        Colisiones: agrega contador si el nombre ya existe en la carpeta destino.
         """
         deadline = time.time() + 30
         nuevo_archivo = None
@@ -374,28 +407,26 @@ class DescargaComprobantes(BaseFlow):
             logger.warning(f"No se detecto PDF nuevo para operacion #{indice}")
             return
 
-        if monto:
-            # Eliminar simbolos de moneda y espacios; conservar solo digitos, comas y puntos
-            monto_limpio = ''.join(c for c in monto if c.isdigit() or c in '.,')
-            nombre_base = f"{monto_limpio} BCP"
-        else:
-            nombre_base = f"{indice} BCP"
+        monto_parte = ''.join(c for c in monto if c.isdigit() or c in '.,') if monto else str(indice)
+        nombre_base = f"{monto_parte} BCP"
 
-        # Evitar sobreescribir si ya existe un archivo con el mismo nombre
+        carpeta = self._carpeta_fecha(fecha)
+
+        # Evitar sobreescribir si ya existe un archivo con el mismo nombre en la carpeta destino
         nombre_destino = f"{nombre_base}.pdf"
-        if os.path.exists(os.path.join(self._downloads_path, nombre_destino)):
+        if os.path.exists(os.path.join(carpeta, nombre_destino)):
             contador = 2
-            while os.path.exists(os.path.join(self._downloads_path, f"{nombre_base} {contador}.pdf")):
+            while os.path.exists(os.path.join(carpeta, f"{nombre_base} {contador}.pdf")):
                 contador += 1
             nombre_destino = f"{nombre_base} {contador}.pdf"
 
         ruta_origen  = os.path.join(self._downloads_path, nuevo_archivo)
-        ruta_destino = os.path.join(self._downloads_path, nombre_destino)
+        ruta_destino = os.path.join(carpeta, nombre_destino)
         try:
             os.rename(ruta_origen, ruta_destino)
-            logger.info(f"PDF renombrado: {nuevo_archivo} → {nombre_destino}")
+            logger.info(f"PDF movido: {nuevo_archivo} → {fecha or 'sin-fecha'}/{nombre_destino}")
         except Exception as e:
-            logger.warning(f"No se pudo renombrar {nuevo_archivo}: {e}")
+            logger.warning(f"No se pudo mover {nuevo_archivo}: {e}")
 
     def _procesar_operaciones(self, max_pdfs: Optional[int]) -> int:
         """
@@ -440,11 +471,17 @@ class DescargaComprobantes(BaseFlow):
                     self._abrir_operacion(fila)
                     monto, tipo_op = self._extraer_monto(codigo)
                     fecha_op = self._extraer_fecha(codigo)
+                    fecha_limpia = self._limpiar_fecha(fecha_op)
                     if not monto:
                         self._capturar_dom_monto_no_encontrado(codigo)
-                    if self._descargar_pdf(codigo, tipo_op):
+                    if self._descargar_pdf(codigo, tipo_op, fecha=fecha_limpia, monto=monto):
                         descargados += 1
-                        self._renombrar_pdf_nuevo(pdfs_antes, monto, descargados)
+                        self._renombrar_pdf_nuevo(pdfs_antes, monto, descargados, fecha_limpia)
+                    # Autodesembolso-Financiamiento: ademas del boton PDF, capturar pantalla via CDP print
+                    # (Autodesembolso-Pago no llega aqui: ya descargo via CDP en _descargar_pdf)
+                    if "autodesembolso - financiamiento" in tipo_op.lower():
+                        logger.info(f"[{codigo}] Autodesembolso-Financiamiento: generando print CDP adicional")
+                        self._descargar_via_print_pdf(codigo, prefijo="auto", fecha=fecha_limpia, monto=monto)
                     self._volver_a_lista()
                     self._restaurar_resultados_y_pagina()
                 except Exception as e:
@@ -537,13 +574,23 @@ class DescargaComprobantes(BaseFlow):
         self.esperar(2)
         logger.debug("Detalle de operacion abierto")
 
-    def _descargar_via_print_pdf(self, codigo: str) -> bool:
+    def _descargar_via_print_pdf(
+        self,
+        codigo: str,
+        prefijo: str = "cheque",
+        fecha: str = "",
+        monto: str = "",
+    ) -> bool:
         """
         Genera un PDF de la pagina actual usando CDP Page.printToPDF.
-        Usado para operaciones sin boton "Descargar PDF" (ej: CHEQUES).
 
-        El PDF se guarda en downloads_path con nombre temporal cheque_<codigo>.pdf
-        para que _renombrar_pdf_nuevo lo detecte y lo renombre correctamente.
+        Usos:
+          - CHEQUES / Autodesembolso-Pago: unico metodo de descarga (sin boton PDF).
+            El archivo se guarda directamente en la carpeta de fecha con nombre '<monto> BCP.pdf'.
+          - Autodesembolso-Financiamiento: complemento al boton PDF (pantalla completa).
+            El archivo se guarda como '<prefijo>_<codigo>.pdf' en la carpeta de fecha.
+
+        Si fecha esta vacio, se usa la carpeta 'sin-fecha'.
         """
         try:
             result = self.driver.execute_cdp_cmd("Page.printToPDF", {
@@ -551,17 +598,32 @@ class DescargaComprobantes(BaseFlow):
                 "preferCSSPageSize": True,
             })
             pdf_bytes = base64.b64decode(result["data"])
-            nombre_temp = f"cheque_{codigo}.pdf"
-            ruta = os.path.join(self._downloads_path, nombre_temp)
+
+            carpeta = self._carpeta_fecha(fecha)
+
+            if monto:
+                monto_parte = ''.join(c for c in monto if c.isdigit() or c in '.,')
+                nombre_base = f"{monto_parte} BCP"
+            else:
+                nombre_base = f"{prefijo}_{codigo}"
+
+            nombre_archivo = f"{nombre_base}.pdf"
+            if os.path.exists(os.path.join(carpeta, nombre_archivo)):
+                contador = 2
+                while os.path.exists(os.path.join(carpeta, f"{nombre_base} {contador}.pdf")):
+                    contador += 1
+                nombre_archivo = f"{nombre_base} {contador}.pdf"
+
+            ruta = os.path.join(carpeta, nombre_archivo)
             with open(ruta, "wb") as f:
                 f.write(pdf_bytes)
-            logger.info(f"PDF generado via print/CDP para operacion {codigo}: {nombre_temp}")
+            logger.info(f"PDF generado via print/CDP: {fecha or 'sin-fecha'}/{nombre_archivo}")
             return True
         except Exception as e:
             logger.warning(f"[{codigo}] No se pudo generar PDF via print/CDP: {e}")
             return False
 
-    def _descargar_pdf(self, codigo: str, tipo_operacion: str = "") -> bool:
+    def _descargar_pdf(self, codigo: str, tipo_operacion: str = "", fecha: str = "", monto: str = "") -> bool:
         """
         Descarga el PDF de la operacion abierta.
 
@@ -579,19 +641,25 @@ class DescargaComprobantes(BaseFlow):
         Tras cada click se verifica que seguimos en tlcbcp.com antes de
         declarar exito.
 
-        Selectores documentados (manual_componentes.md):
-          - Transferencias: //bcp-button-ntlc-commons-widgets//button[contains(., "Descargar PDF")]
-          - FEC:            //fec-button-export-pdf//button[contains(., "Descargar PDF")]
+        Selectores documentados (manual_componentes.md + doms/):
+          - Transferencias:   //bcp-button-ntlc-commons-widgets//button[contains(., "Descargar PDF")]
+          - FEC:              //fec-button-export-pdf//button[contains(., "Descargar PDF")]
+          - Generico PDF:     //button[contains(normalize-space(.), "Descargar PDF")]
+          - Pago servicios:   //button[contains(normalize-space(.), "Descargar detalle")]
         """
-        # CHEQUES y otros tipos sin boton: usar print via CDP
+        # Tipos sin boton: solo CDP print (guarda directo en carpeta de fecha con nombre de monto)
         if "cheque" in tipo_operacion.lower():
             logger.info(f"[{codigo}] Tipo CHEQUES: descargando via print/CDP")
-            return self._descargar_via_print_pdf(codigo)
+            return self._descargar_via_print_pdf(codigo, prefijo="cheque", fecha=fecha, monto=monto)
+        if "autodesembolso - pago" in tipo_operacion.lower():
+            logger.info(f"[{codigo}] Tipo Autodesembolso-Pago: descargando via print/CDP")
+            return self._descargar_via_print_pdf(codigo, prefijo="autopago", fecha=fecha, monto=monto)
 
         candidatos = [
             ("Transferencia", S.BTN_DESCARGAR_PDF_TRANSFER),
             ("FEC/Autodesembolso", S.BTN_DESCARGAR_PDF_FEC),
             ("Generico", S.BTN_DESCARGAR_PDF_GENERIC),
+            ("Detalle", S.BTN_DESCARGAR_DETALLE),
         ]
 
         for tipo, xpath in candidatos:
