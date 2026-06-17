@@ -156,7 +156,7 @@ def _run_libre(session: Session):
 # Background flow
 # ---------------------------------------------------------------------------
 
-def _run_flow(session: Session, fecha_desde: str, fecha_hasta: str, max_pdfs: int):
+def _run_flow(session: Session, fecha: str, max_pdfs: int):
     thread_id = threading.current_thread().ident
     with _ts_lock:
         _thread_sessions[thread_id] = session
@@ -210,11 +210,7 @@ def _run_flow(session: Session, fecha_desde: str, fecha_hasta: str, max_pdfs: in
         logger.info("Login confirmado. Iniciando descarga de comprobantes...")
 
         flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH, logs_path=LOGS_PATH)
-        descargados = flow.ejecutar(
-            fecha_desde=fecha_desde,
-            fecha_hasta=fecha_hasta,
-            max_pdfs=max_pdfs,
-        )
+        descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
 
         session.resultado = descargados
         session.status = SessionStatus.COMPLETADO
@@ -259,8 +255,7 @@ def sesion_activa():
 
 
 class IniciarRequest(BaseModel):
-    fecha_desde: str  # DD/MM/YYYY
-    fecha_hasta: str  # DD/MM/YYYY
+    fecha: str  # DD/MM/YYYY
     max_pdfs: int | None = None
 
 
@@ -293,7 +288,7 @@ def iniciar(req: IniciarRequest):
     session = session_manager.crear("bcp")
     t = threading.Thread(
         target=_run_flow,
-        args=(session, req.fecha_desde, req.fecha_hasta, req.max_pdfs),
+        args=(session, req.fecha, req.max_pdfs),
         daemon=True,
     )
     t.start()

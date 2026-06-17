@@ -2,11 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { iniciarBCP, confirmarLoginBCP, cancelarBCP, capturarDomBCP, iniciarLibreBCP, suscribirLogs, getConfig, sesionActivaBCP } from '../api/client'
 import { LogsPanel } from './LogsPanel'
 
-/** Fecha de hoy en timezone Lima → "YYYY-MM-DD" (valor para input type=date) */
-function todayISO() {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Lima' })
-}
-
 /** Retorna el ultimo dia laborable anterior a hoy en timezone Lima (YYYY-MM-DD).
  *  Lunes → Viernes anterior (retrocede 3 dias)
  *  Domingo → Viernes anterior (retrocede 2 dias)
@@ -54,9 +49,8 @@ const STATUS_COLORS = {
 }
 
 export function BCPPanel() {
-  const [fechaDesde, setFechaDesde] = useState(ultimoDiaLaborable)
-  const [fechaHasta, setFechaHasta] = useState(todayISO)
-  const [maxPdfs,    setMaxPdfs]    = useState('')
+  const [fecha,   setFecha]   = useState(ultimoDiaLaborable)
+  const [maxPdfs, setMaxPdfs] = useState('')
 
   const [sessionId,    setSessionId]    = useState(null)
   const [status,       setStatus]       = useState(null)
@@ -120,8 +114,7 @@ export function BCPPanel() {
     setResultado(null)
     try {
       const data = await iniciarBCP({
-        fechaDesde: toDisplayDate(fechaDesde),
-        fechaHasta: toDisplayDate(fechaHasta),
+        fecha: toDisplayDate(fecha),
         maxPdfs: maxPdfs !== '' ? Number(maxPdfs) : null,
       })
       setSessionId(data.session_id)
@@ -193,7 +186,7 @@ export function BCPPanel() {
         <div className="bank-hero">
           <div className="hero-text">
             <h2>Descarga de Comprobantes</h2>
-            <p>Selecciona el rango de fechas y el bot descargará<br />los PDFs desde el portal Telecredito.</p>
+            <p>Selecciona la fecha y el bot descargará<br />los PDFs desde el portal Telecredito.</p>
           </div>
           <i className="fa-solid fa-file-arrow-down hero-icon" />
         </div>
@@ -208,7 +201,7 @@ export function BCPPanel() {
             <div className="card-header-row">
               <div>
                 <div className="card-title">Parámetros de descarga</div>
-                <div className="card-subtitle">Rango de fechas en horario de Lima (UTC-5)</div>
+                <div className="card-subtitle">Fecha en horario de Lima (UTC-5)</div>
               </div>
             </div>
           </div>
@@ -216,23 +209,13 @@ export function BCPPanel() {
             <form onSubmit={handleIniciar}>
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Fecha desde</label>
+                  <label className="form-label">Fecha</label>
                   <input
                     className="form-input"
                     type="date"
                     required
-                    value={fechaDesde}
-                    onChange={(e) => setFechaDesde(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Fecha hasta</label>
-                  <input
-                    className="form-input"
-                    type="date"
-                    required
-                    value={fechaHasta}
-                    onChange={(e) => setFechaHasta(e.target.value)}
+                    value={fecha}
+                    onChange={(e) => setFecha(e.target.value)}
                   />
                 </div>
                 <div className="form-group">

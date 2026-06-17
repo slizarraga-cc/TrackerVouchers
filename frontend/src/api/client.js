@@ -13,15 +13,11 @@ export async function getConfig() {
   return res.json()
 }
 
-export async function iniciarBCP({ fechaDesde, fechaHasta, maxPdfs }) {
+export async function iniciarBCP({ fecha, maxPdfs }) {
   const res = await fetch(`${BASE}/bcp/iniciar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fecha_desde: fechaDesde,
-      fecha_hasta: fechaHasta,
-      max_pdfs: maxPdfs,
-    }),
+    body: JSON.stringify({ fecha, max_pdfs: maxPdfs ?? null }),
   })
   if (!res.ok) throw new Error(extractError(await res.json()))
   return res.json()
