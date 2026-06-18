@@ -62,7 +62,7 @@ function TablaArchivos({ archivos }) {
       </thead>
       <tbody>
         {archivos.map((doc) => (
-          <tr key={doc.nombre}>
+          <tr key={doc.ruta}>
             <td className="tabla-cell-nombre">
               <i className="fa-solid fa-file-pdf" style={{ color: '#E53E3E', marginRight: '8px' }} />
               {doc.nombre}
@@ -73,7 +73,7 @@ function TablaArchivos({ archivos }) {
               <button
                 className="btn-ghost"
                 style={{ padding: '5px 10px', fontSize: '12px' }}
-                onClick={() => triggerDownload(urlDescargarArchivo(doc.nombre), doc.nombre)}
+                onClick={() => triggerDownload(urlDescargarArchivo(doc.ruta), doc.nombre)}
               >
                 <i className="fa-solid fa-download" />
                 Descargar

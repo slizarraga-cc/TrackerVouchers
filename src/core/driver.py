@@ -53,6 +53,12 @@ def get_driver(remote: bool = True, grid_url: str = None, use_camera: bool = Fal
         logger.info("Driver local iniciado")
         download_dir = DOWNLOAD_DIR_LOCAL
 
+    # Fuerza la timezone del navegador a Lima para que el banco no detecte UTC
+    # y desplace las fechas (afecta Intl.DateTimeFormat y new Date() en el JS del banco)
+    driver.execute_cdp_cmd("Emulation.setTimezoneOverride", {
+        "timezoneId": "America/Lima"
+    })
+
     # CDP garantiza la descarga automatica sin dialogo incluso en Grid remoto
     driver.execute_cdp_cmd("Page.setDownloadBehavior", {
         "behavior": "allow",
