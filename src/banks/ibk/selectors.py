@@ -148,3 +148,85 @@ class IBKSelectors:
         '//*[@testid="lnkBack"] | '
         '//*[contains(@class,"back") and contains(normalize-space(),"Regresar")]'
     )
+
+    # =========================================================================
+    # FLUJO 2 — Historial de Pago de Servicios
+    # URL base: https://empresas.interbank.pe/pagos-transferencias/servicios
+    # Confirmado en: doms/pagos_servicios.html
+    #                doms/historial_pagos_servicios.html
+    #                doms/busqueda_historial_pago_servicios.html
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # URLs
+    # Navegar directo al historial evita tener que clickear el tab
+    # -------------------------------------------------------------------------
+    SERVICIOS_URL          = "https://empresas.interbank.pe/pagos-transferencias/servicios"
+    SERVICIOS_HISTORIAL_URL = "https://empresas.interbank.pe/pagos-transferencias/servicios/historial"
+
+    # -------------------------------------------------------------------------
+    # Tab "Historial" en la pagina de Pagos de servicios
+    # Confirmado: ibk-headline-option[data-test="lnkHistory"] > a[href=".../historial"]
+    # Estabilidad: ALTA (data-test semantico)
+    # -------------------------------------------------------------------------
+    TAB_HISTORIAL = '//*[@data-test="lnkHistory"]'
+
+    # -------------------------------------------------------------------------
+    # Selector de cuenta de cargo
+    # Confirmado: mat-select[data-test="cmbAccount"]
+    # Las opciones aparecen en el CDK overlay al abrir el select.
+    # Estabilidad: ALTA (data-test semantico)
+    # -------------------------------------------------------------------------
+    SELECT_CUENTA = 'mat-select[data-test="cmbAccount"]'
+
+    # -------------------------------------------------------------------------
+    # Tabla de resultados del historial de servicios
+    # Confirmado: ibk-table[data-test="tblResultado"]
+    # Columnas (0-based):
+    #   [0] Nro. de solicitud
+    #   [1] Fecha de solicitud
+    #   [2] Descripcion
+    #   [3] Monto soles
+    #   [4] Monto dolares
+    #   [5] Procesados
+    #   [6] Rechazados
+    #   [7] Estado        <- filtrar "Procesada"
+    #   [8] Detalle       <- ibk-icon[icon="search"] para abrir el detalle
+    # Estabilidad: ALTA (data-test semantico en la tabla)
+    # -------------------------------------------------------------------------
+    TABLA_SERVICIOS          = 'ibk-table[data-test="tblResultado"]'
+    TABLA_SERVICIOS_FILAS    = (
+        '//ibk-table[@data-test="tblResultado"]'
+        '//ibk-table-body//ibk-table-row'
+    )
+
+    # Estado "Procesada" (col 7, 1-based = ibk-table-cell[8])
+    ESTADO_PROCESADA = "Procesada"
+
+    # Lupa de detalle: ibk-icon[icon="search"] dentro de la ultima celda de la fila.
+    # Confirmado: ibk-table-cell[9] > div > ibk-icon[icon="search"]
+    # Estabilidad: MEDIA (posicion de columna puede variar si agregan columnas)
+    BTN_LUPA_SERVICIOS          = './/ibk-table-cell[9]//ibk-icon[@icon="search"]'
+    BTN_LUPA_SERVICIOS_FALLBACK = './/ibk-icon[@icon="search" and contains(@class,"cursor-pointer")]'
+
+    # -------------------------------------------------------------------------
+    # Pantalla de detalle del pago
+    # Confirmado en: doms/historial_pago_detallado.html
+    # -------------------------------------------------------------------------
+
+    # Monto del pago
+    # Confirmado: ibk-card-description[data-test="lblAmountValue"] -> " S/ 12,642.06 "
+    # Estabilidad: ALTA (data-test semantico)
+    DETALLE_MONTO = '//*[@data-test="lblAmountValue"]'
+
+    # Lista de autorizadores con sus fechas
+    # Estructura: ul[data-test="txtAutoriza"] > li* > span " - DD/MM/YYYY | HH:MM:SS "
+    # Se toma la ULTIMA li (ultimo autorizador = MATIAS GRUNWALD en el ejemplo)
+    # Estabilidad: ALTA (data-test semantico)
+    DETALLE_AUTORIZADORES_UL = '//ul[@data-test="txtAutoriza"]'
+    DETALLE_ULTIMO_AUTORIZADOR_FECHA = '(//ul[@data-test="txtAutoriza"]//li[last()]//span)[1]'
+
+    # Boton descargar constancia (PDF)
+    # Confirmado: a[data-test="lnkDownloadConstancy"][title="Descargar constancia"]
+    # Estabilidad: ALTA (data-test semantico)
+    BTN_DESCARGAR_CONSTANCIA = '//*[@data-test="lnkDownloadConstancy"]'

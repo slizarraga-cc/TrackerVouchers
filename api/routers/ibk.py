@@ -277,14 +277,27 @@ def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
         session.current_frame = None
 
         session.status = SessionStatus.EJECUTANDO
-        logger.info("Login confirmado. Iniciando descarga de comprobantes IBK...")
+        logger.info("Login confirmado. Iniciando flujos IBK en orden secuencial...")
 
-        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH)
-        descargados = flow.ejecutar(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, max_pdfs=max_pdfs)
+        from src.banks.ibk.flows.consulta_operaciones import ConsultaOperaciones
 
-        session.resultado = descargados
+        # --- Flujo 1: Descarga de comprobantes masivos (pagos masivos historial) ---
+        logger.info("=== FLUJO 1: Descarga de comprobantes masivos ===")
+        flow1 = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH)
+        descargados_f1 = flow1.ejecutar(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, max_pdfs=max_pdfs)
+        logger.success(f"Flujo 1 finalizado: {descargados_f1} archivo(s) descargados.")
+
+        # --- Flujo 2: Historial de pago de servicios (por cuenta de cargo) ---
+        logger.info("=== FLUJO 2: Historial de pago de servicios ===")
+        restante_f2 = (max_pdfs - descargados_f1) if max_pdfs is not None else None
+        flow2 = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH)
+        descargados_f2 = flow2.ejecutar(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, max_pdfs=restante_f2)
+        logger.success(f"Flujo 2 finalizado: {descargados_f2} archivo(s) descargados.")
+
+        total = descargados_f1 + descargados_f2
+        session.resultado = total
         session.status = SessionStatus.COMPLETADO
-        logger.success(f"Completado: {descargados} archivo(s) descargados.")
+        logger.success(f"Completado: {total} archivo(s) descargados (F1={descargados_f1}, F2={descargados_f2}).")
 
     except Exception as e:
         session.status = SessionStatus.LIBRE

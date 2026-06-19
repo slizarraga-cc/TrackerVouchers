@@ -319,16 +319,29 @@ class DescargaComprobantes(BaseFlow):
         dia, mes, anio = m.group(1), m.group(2), m.group(3)
         return f"{anio}-{mes}-{dia}"
 
-    def _extraer_fecha(self, codigo: str) -> str:
+    def _extraer_fecha(self, codigo: str, tipo: str = "") -> str:
         """
         Intenta extraer la fecha de operacion del detalle abierto.
 
-        Prueba los labels de S.FECHA_LABELS en orden usando el patron:
-          //div[normalize-space()="<label>"]/following-sibling::div[1]
+        Si se proporciona `tipo`, busca primero el label especifico definido en
+        S.FECHA_LABEL_POR_TIPO para ese tipo (evita colisiones cuando el DOM
+        tiene multiples labels de fecha, ej: "Fecha de envio" y "Fecha de proceso").
+        Luego itera S.FECHA_LABELS como fallback.
 
         Retorna la fecha como cadena (ej: "22/04/2026") o "" si no se encontro.
         """
-        for label in S.FECHA_LABELS:
+        candidatos = list(S.FECHA_LABELS)
+        if tipo:
+            tipo_lower = tipo.lower()
+            for clave, label_preferido in S.FECHA_LABEL_POR_TIPO.items():
+                if clave in tipo_lower:
+                    if label_preferido in candidatos:
+                        candidatos.remove(label_preferido)
+                    candidatos.insert(0, label_preferido)
+                    logger.debug(f"[{codigo}] Label de fecha preferido para '{tipo}': '{label_preferido}'")
+                    break
+
+        for label in candidatos:
             xpath = f'//div[normalize-space()="{label}"]/following-sibling::div[1]'
             try:
                 el = self.esperar_elemento(xpath, timeout=2)
@@ -470,7 +483,7 @@ class DescargaComprobantes(BaseFlow):
                 try:
                     self._abrir_operacion(fila)
                     monto, tipo_op = self._extraer_monto(codigo)
-                    fecha_op = self._extraer_fecha(codigo)
+                    fecha_op = self._extraer_fecha(codigo, tipo_op)
                     fecha_limpia = self._limpiar_fecha(fecha_op)
                     if not monto:
                         self._capturar_dom_monto_no_encontrado(codigo)

@@ -233,6 +233,30 @@ class BCPSelectors:
         "Fecha de proceso",
     ]
 
+    # Mapa tipo de operacion (lowercase fragment) -> label de fecha CORRECTO para ese tipo.
+    # Varios DOMs contienen MULTIPLES labels de fecha (ej: "Fecha de envío" Y "Fecha de proceso").
+    # Este mapa permite priorizar el label correcto antes de iterar FECHA_LABELS.
+    #
+    # Verificado contra DOMs:
+    #   tipo_cambio.html                        → "Fecha de proceso" (tiene ademas "Fecha de envío")
+    #   transferencia_otros_bancos_exterior.html → "Fecha de proceso" (tiene ademas "Fecha de envío")
+    #   otros_bancos_diferida.html               → "Fecha de proceso" (tiene ademas "Fecha de envío")
+    #   pago_servicios.html                      → "Fecha de proceso" (tiene ademas "Fecha de solicitud", "Fecha de envío")
+    #   pago_masivo_proveedores.html             → "Fecha de pago"    (tiene ademas "Fecha de envío")
+    #   cheques.html                             → "Fecha de pago"    (tiene ademas "Fecha de solicitud", "Fecha de envío")
+    #   autodesembolso_pago.html                 → "Fecha de envío"   (unico label, sin conflicto)
+    #   autodesembolso_financiamiento.html       → "Fecha de envío"   (unico label, sin conflicto)
+    FECHA_LABEL_POR_TIPO: dict = {
+        'tipo de cambio':                            'Fecha de proceso',
+        'transferencias a cuentas de terceros':      'Fecha de proceso',
+        'transferencia a otros bancos locales':      'Fecha de proceso',
+        'transferencia a otros bancos del exterior': 'Fecha de proceso',
+        'pago de servicios':                         'Fecha de proceso',
+        'pago masivo a proveedores':                 'Fecha de pago',
+        'cheques':                                   'Fecha de pago',
+        'autodesembolso':                            'Fecha de envío',   # pago y financiamiento
+    }
+
     # -------------------------------------------------------------------------
     # Paginacion
     # Ref: documentacion de flujo — PASO 4
