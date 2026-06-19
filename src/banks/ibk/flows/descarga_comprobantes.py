@@ -177,7 +177,15 @@ class DescargaComprobantes(BaseFlow):
     def _ingresar_fechas(self, fecha_inicio: str, fecha_fin: str) -> None:
         """
         Ingresa fecha inicio y fin en los ibk-datepicker-v2.
-        Los inputs se identifican por data-mat-calendar (sin placeholder).
+        Los inputs se identifican por data-mat-calendar (sin name ni placeholder).
+
+        NO usar inp.click(): abre el calendario dialog de Angular Material y
+        Keys.ESCAPE lo cierra descartando el valor escrito.
+        Estrategia correcta:
+          1. focus() via JS — activa el input sin abrir el calendario
+          2. CTRL+A para seleccionar todo
+          3. Escribir la fecha
+          4. TAB — mueve el foco, dispara blur, Angular parsea y acepta la fecha
         """
         self._guardar_dom("antes_ingresar_fechas")
         for xpath, etiqueta, valor in [
@@ -188,19 +196,28 @@ class DescargaComprobantes(BaseFlow):
                 inp = self.esperar_elemento(xpath, timeout=8)
                 self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", inp)
                 self.liberar_modificadores()
-                inp.click()
-                inp.send_keys(Keys.CONTROL + "a")
-                inp.send_keys(Keys.DELETE)
-                inp.send_keys(valor)
+                # ESCAPE cierra cualquier calendario que haya abierto el TAB anterior
                 inp.send_keys(Keys.ESCAPE)
-                logger.debug(f"Fecha {etiqueta}: '{valor}' ingresada (send_keys)")
+                self.esperar(0.2)
+                self.driver.execute_script("arguments[0].focus();", inp)
+                self.esperar(0.3)
+                inp.send_keys(Keys.CONTROL + "a")
+                inp.send_keys(Keys.DELETE)   # limpia el valor default que Angular pone
+                inp.send_keys(valor)
+                inp.send_keys(Keys.TAB)      # TAB confirma; ESCAPE cancelaria
+                self.esperar(0.3)
+                logger.debug(f"Fecha {etiqueta}: '{valor}' ingresada (focus+TAB)")
             except Exception:
                 ok = self.rellenar_fecha_xpath(xpath, valor)
                 logger.debug(f"Fecha {etiqueta}: '{valor}' ingresada (JS fallback, ok={ok})")
         self.esperar(0.5)
 
     def rellenar_fecha_xpath(self, xpath: str, valor: str) -> bool:
-        """Rellena un input localizado por XPath usando nativeInputValueSetter."""
+        """
+        Rellena un input localizado por XPath usando nativeInputValueSetter.
+        Dispara input + blur: Angular Material parsea la fecha en 'input'
+        y valida/confirma en 'blur'. Sin 'blur' el valor queda pendiente.
+        """
         script = """
         const inputs = document.evaluate(
             arguments[0], document, null,
@@ -213,6 +230,7 @@ class DescargaComprobantes(BaseFlow):
         setter.call(input, arguments[1]);
         input.dispatchEvent(new Event('input',  { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('blur',   { bubbles: true }));
         return true;
         """
         return bool(self.driver.execute_script(script, xpath, valor))

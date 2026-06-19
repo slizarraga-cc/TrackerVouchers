@@ -142,11 +142,15 @@ class IBKSelectors:
     # Boton Regresar (volver al historial desde el detalle)
     # Estabilidad: ALTA (texto visible semantico)
     # -------------------------------------------------------------------------
+    # Confirmado en doms/historial_pago_detallado.html:
+    # ibk-link[data-test="lnkReturn"] — Web Component, NO es <a> ni <button>
     BTN_REGRESAR = (
+        '//*[@data-test="lnkReturn"] | '
+        '//*[@testid="lnkReturn"] | '
         '//a[contains(normalize-space(),"Regresar")] | '
         '//button[contains(normalize-space(),"Regresar")] | '
         '//*[@testid="lnkBack"] | '
-        '//*[contains(@class,"back") and contains(normalize-space(),"Regresar")]'
+        '//*[@data-test="lnkBack"]'
     )
 
     # =========================================================================
@@ -162,7 +166,7 @@ class IBKSelectors:
     # Navegar directo al historial evita tener que clickear el tab
     # -------------------------------------------------------------------------
     SERVICIOS_URL          = "https://empresas.interbank.pe/pagos-transferencias/servicios"
-    SERVICIOS_HISTORIAL_URL = "https://empresas.interbank.pe/pagos-transferencias/servicios/historial"
+    SERVICIOS_HISTORIAL_URL = "https://empresas.interbank.pe/pagos-transferencias/servicios/historial/"
 
     # -------------------------------------------------------------------------
     # Tab "Historial" en la pagina de Pagos de servicios
