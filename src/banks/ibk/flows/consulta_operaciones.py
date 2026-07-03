@@ -25,6 +25,7 @@ Fuente DOM: doms/pagos_servicios.html
             doms/historial_pago_detallado.html
 """
 
+import base64
 import os
 import re
 import time
@@ -497,11 +498,57 @@ class ConsultaOperaciones(BaseFlow):
 
     def _descargar_constancia(self) -> bool:
         """
-        Hace click en a[data-test="lnkDownloadConstancy"] y espera que
-        el archivo PDF aparezca en downloads_path (hasta 30 segundos).
+        Descarga la constancia del detalle.
 
-        Retorna True si el PDF fue detectado, False si timeout.
+        IBK Angular: click → fetch PDF → Blob → URL.createObjectURL → iframe.src → iframe.contentWindow.print()
+        El print() falla con SecurityError cuando el iframe queda cross-origin (chrome bloquea el acceso).
+
+        Estrategia principal (blob_intercept):
+          1. Antes del click, sobrescribir URL.createObjectURL para capturar el blob PDF en window.__ibkPdfUrl.
+          2. También interceptar HTMLIFrameElement.src por si IBK asigna el blob directamente al iframe.
+          3. Suprimir window.print para evitar el dialogo nativo.
+          4. Click en el boton.
+          5. Esperar hasta 15s que window.__ibkPdfUrl sea asignado.
+          6. Disparar descarga via <a href=blob download>.
+          7. Esperar el archivo en disco.
+
+        Fallback: CDP Page.printToPDF sobre la pagina de detalle actual.
         """
+        # ── Inyectar interceptores ANTES del click ────────────────────────────
+        self.driver.execute_script("""
+            window.__ibkPdfUrl = null;
+
+            // Suprimir dialogo de impresion nativo
+            window.print = function() {};
+
+            // Capturar blob PDF al crearse
+            const _orig = URL.createObjectURL.bind(URL);
+            URL.createObjectURL = function(blob) {
+                const url = _orig(blob);
+                const t = ((blob && blob.type) || '').toLowerCase();
+                if (t.includes('pdf') || t.includes('octet-stream')) {
+                    window.__ibkPdfUrl = url;
+                }
+                return url;
+            };
+
+            // Capturar iframe.src (IBK puede asignar blob URL directamente al iframe)
+            const _d = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+            if (_d && _d.set) {
+                Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
+                    set: function(v) {
+                        _d.set.call(this, v);
+                        if (v && v.startsWith('blob:')) {
+                            window.__ibkPdfUrl = v;
+                        }
+                    },
+                    get: _d.get,
+                    configurable: true,
+                });
+            }
+        """)
+
+        # ── Click en el boton ─────────────────────────────────────────────────
         try:
             el = self.esperar_elemento(S.BTN_DESCARGAR_CONSTANCIA, timeout=8)
             self.click_js(el)
@@ -511,20 +558,72 @@ class ConsultaOperaciones(BaseFlow):
             self._guardar_dom("constancia_btn_no_encontrado")
             return False
 
-        # Esperar a que aparezca un nuevo PDF en la carpeta de descargas
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            nuevos = {
-                f for f in os.listdir(self._downloads_path)
-                if f.lower().endswith('.pdf') and not f.endswith('.crdownload')
-            }
-            if nuevos:
-                logger.debug(f"PDF detectado en downloads: {nuevos}")
-                return True
-            time.sleep(0.5)
+        # ── Esperar blob URL (hasta 15s) ──────────────────────────────────────
+        pdf_url = None
+        for _ in range(30):
+            pdf_url = self.driver.execute_script("return window.__ibkPdfUrl;")
+            if pdf_url:
+                break
+            self.esperar(0.5)
 
-        logger.warning("Timeout esperando descarga de constancia (30s)")
-        return False
+        if pdf_url:
+            logger.debug(f"Blob URL capturada: {pdf_url[:80]}...")
+            # Disparar descarga via <a href=blob download>
+            self.driver.execute_script("""
+                const a = document.createElement('a');
+                a.href = arguments[0];
+                a.download = '_constancia_ibk_temp.pdf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            """, pdf_url)
+
+            # Esperar hasta 30s que aparezca el archivo en disco
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                pdfs = {
+                    f for f in os.listdir(self._downloads_path)
+                    if f.lower().endswith('.pdf') and not f.endswith('.crdownload')
+                }
+                if pdfs:
+                    logger.debug(f"PDF detectado en downloads: {pdfs}")
+                    return True
+                time.sleep(0.5)
+
+            logger.warning("Timeout esperando descarga (blob URL capturada pero sin archivo en disco)")
+            return False
+
+        # ── Fallback: CDP Page.printToPDF ─────────────────────────────────────
+        logger.debug("Sin blob URL — fallback CDP Page.printToPDF sobre pagina de detalle")
+        try:
+            self.driver.execute_cdp_cmd("Emulation.setEmulatedMedia", {"media": "print"})
+            self.esperar(1)
+            result = self.driver.execute_cdp_cmd("Page.printToPDF", {
+                "printBackground": True,
+                "paperWidth":  8.27,
+                "paperHeight": 11.69,
+                "marginTop":    0.4,
+                "marginBottom": 0.4,
+                "marginLeft":   0.4,
+                "marginRight":  0.4,
+                "scale": 0.9,
+            })
+            pdf_bytes = base64.b64decode(result["data"])
+            ruta = os.path.join(self._downloads_path, "_constancia_ibk_cdp.pdf")
+            os.makedirs(self._downloads_path, exist_ok=True)
+            with open(ruta, "wb") as f:
+                f.write(pdf_bytes)
+            logger.info(f"PDF guardado via CDP fallback: {len(pdf_bytes):,} bytes → {ruta}")
+            return True
+        except Exception as e:
+            logger.error(f"CDP Page.printToPDF fallo: {e}")
+            self._guardar_dom("constancia_cdp_error")
+            return False
+        finally:
+            try:
+                self.driver.execute_cdp_cmd("Emulation.setEmulatedMedia", {"media": ""})
+            except Exception:
+                pass
 
     def _carpeta_fecha(self, fecha: str) -> str:
         """Retorna (y crea) el subdirectorio downloads_path/YYYY-MM-DD/."""

@@ -70,6 +70,61 @@ export function suscribirLogs(sessionId, onLog, onStatus) {
 }
 
 // ---------------------------------------------------------------------------
+// BCP2
+// ---------------------------------------------------------------------------
+
+export async function iniciarBCP2({ fecha, maxPdfs }) {
+  const res = await fetch(`${BASE}/bcp2/iniciar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fecha, max_pdfs: maxPdfs ?? null }),
+  })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
+export async function confirmarLoginBCP2(sessionId) {
+  const res = await fetch(`${BASE}/bcp2/${sessionId}/confirmar-login`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.detail || 'Error al confirmar login BCP2')
+  }
+  return res.json()
+}
+
+export async function cancelarBCP2(sessionId) {
+  const res = await fetch(`${BASE}/bcp2/${sessionId}/cancelar`, { method: 'POST' })
+  return res.json()
+}
+
+export async function capturarDomBCP2(sessionId) {
+  const res = await fetch(`${BASE}/bcp2/${sessionId}/capturar-dom`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
+export async function iniciarLibreBCP2() {
+  const res = await fetch(`${BASE}/bcp2/iniciar-libre`, { method: 'POST' })
+  if (!res.ok) throw new Error(extractError(await res.json()))
+  return res.json()
+}
+
+export async function sesionActivaBCP2() {
+  const res = await fetch(`${BASE}/bcp2/sesion-activa`)
+  return res.json()
+}
+
+export function suscribirLogsBCP2(sessionId, onLog, onStatus) {
+  const es = new EventSource(`${BASE}/bcp2/${sessionId}/logs`)
+  es.onmessage = (e) => onLog(e.data)
+  es.addEventListener('status', (e) => onStatus(e.data))
+  es.onerror = () => es.close()
+  return es
+}
+
+// ---------------------------------------------------------------------------
 // BBVA
 // ---------------------------------------------------------------------------
 

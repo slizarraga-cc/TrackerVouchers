@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { BCPPanel }        from './components/BCPPanel'
+import { BCP2Panel }       from './components/BCP2Panel'
 import { BBVAPanel }       from './components/BBVAPanel'
 import { IBKPanel }        from './components/IBKPanel'
 import { ScotiabankPanel } from './components/ScotiabankPanel'
@@ -8,7 +9,8 @@ import { CameraTest }      from './components/CameraTest'
 
 const MODULES = [
   // Bancos
-  { id: 'bcp',        label: 'BCP',        icon: 'fa-building-columns', section: 'bancos',       component: BCPPanel },
+  { id: 'bcp',        label: 'BCP Soles',  icon: 'fa-building-columns', section: 'bancos',       component: BCPPanel },
+  { id: 'bcp2',       label: 'BCP 2',      icon: 'fa-building-columns', section: 'bancos',       component: BCP2Panel },
   { id: 'bbva',       label: 'BBVA',       icon: 'fa-building-columns', section: 'bancos',       component: BBVAPanel },
   { id: 'interbank',  label: 'Interbank',  icon: 'fa-building-columns', section: 'bancos',       component: IBKPanel },
   { id: 'scotiabank', label: 'Scotiabank', icon: 'fa-building-columns', section: 'bancos',       component: ScotiabankPanel },
@@ -24,7 +26,8 @@ const SECTIONS = [
 ]
 
 const TOPBAR_TITLES = {
-  bcp:           'Descarga de Comprobantes — BCP Telecredito',
+  bcp:           'Descarga de Comprobantes — BCP Telecredito (Cuenta 1)',
+  bcp2:          'Descarga de Comprobantes — BCP Telecredito (Cuenta 2)',
   bbva:          'Seguimiento de Pagos Masivos — BBVA Net Cash',
   interbank:     'Descarga de Comprobantes — Interbank Empresas',
   scotiabank:    'Descarga de Comprobantes — Scotiabank Empresas',

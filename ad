@@ -1,0 +1,1 @@
+11eed6c25552d5b5_complete.js:425 ERROR SecurityError: Failed to read a named property 'print' from 'Window': Blocked a frame with origin “https://empresas.interbank.pe” from accessing a cross-origin frame. at P.<computed> (polyfills.d247470c98263845.js:1:14410) at u.invokeTask (polyfills.d247470c98263845.js:1:23569) at Object.
