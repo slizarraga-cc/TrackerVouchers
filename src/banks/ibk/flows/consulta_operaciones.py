@@ -672,7 +672,23 @@ class ConsultaOperaciones(BaseFlow):
 
         if pdf_url:
             logger.debug(f"Blob URL capturada: {pdf_url[:80]}...")
-            # Disparar descarga via <a href=blob download>
+
+            # IBK ya disparó una descarga HTTP directa vía XHR (Content-Disposition: attachment).
+            # Esperamos hasta 5s para ver si el archivo ya llegó a disco antes de
+            # duplicar con nuestro anchor download.
+            deadline_directo = time.time() + 5
+            while time.time() < deadline_directo:
+                nuevos = {
+                    f for f in os.listdir(self._downloads_path)
+                    if f.lower().endswith('.pdf') and not f.endswith('.crdownload')
+                } - pdfs_pre
+                if nuevos:
+                    logger.info(f"Descarga XHR directa detectada: {nuevos} — sin anchor necesario")
+                    return True
+                time.sleep(0.5)
+
+            # Si no llegó por descarga directa, disparar anchor download con el blob
+            logger.debug("Sin descarga directa tras 5s — disparando anchor download con blob URL")
             self.driver.execute_script("""
                 const a = document.createElement('a');
                 a.href = arguments[0];
@@ -682,19 +698,19 @@ class ConsultaOperaciones(BaseFlow):
                 document.body.removeChild(a);
             """, pdf_url)
 
-            # Esperar hasta 30s que aparezca el archivo en disco
+            # Esperar hasta 30s que aparezca el archivo nuevo en disco
             deadline = time.time() + 30
             while time.time() < deadline:
-                pdfs = {
+                nuevos = {
                     f for f in os.listdir(self._downloads_path)
                     if f.lower().endswith('.pdf') and not f.endswith('.crdownload')
-                }
-                if pdfs:
-                    logger.debug(f"PDF detectado en downloads: {pdfs}")
+                } - pdfs_pre
+                if nuevos:
+                    logger.debug(f"PDF nuevo detectado tras anchor download: {nuevos}")
                     return True
                 time.sleep(0.5)
 
-            logger.warning("Timeout esperando descarga (blob URL capturada pero sin archivo en disco)")
+            logger.warning("Timeout esperando descarga (blob URL capturada pero sin archivo nuevo en disco)")
             return False
 
         # ── Fallback: CDP Page.printToPDF ─────────────────────────────────────

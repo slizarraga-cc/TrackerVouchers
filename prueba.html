@@ -1,0 +1,58 @@
+Conectando al Selenium Grid IBK...
+Driver remoto conectado a http://selenium-ibk:4444
+Download dir configurado via CDP: /home/seluser/Downloads
+Permisos de cámara concedidos via CDP para empresas.interbank.pe
+JS de override de cámara inyectado via CDP
+Navegando al portal Interbank Empresas...
+Portal abierto. Completa el ingreso en el visor y luego haz clic en 'Confirmar login'.
+[keep-alive] Sesion activa en Selenium Grid
+[keep-alive] Sesion activa en Selenium Grid
+[keep-alive] Sesion activa en Selenium Grid
+Login confirmado. Iniciando flujos IBK en orden secuencial...
+=== FLUJO 2: Historial de pago de servicios ===
+Iniciando ConsultaOperaciones IBK F2 | desde: 26/06/2026 hasta: 26/06/2026 | max: sin limite
+Navegado a: https://empresas.interbank.pe/pagos-transferencias/servicios/historial/
+[DOM] 'historial_cargado' guardado -> /app/logs/dom_IBK_F2_historial_cargado_20260703_181159.html
+[DOM] 'cuentas_dropdown_abierto' guardado -> /app/logs/dom_IBK_F2_cuentas_dropdown_abierto_20260703_181200.html
+Cuentas disponibles: ['Corriente Soles 200-3002926880', 'Corriente Dólares 200-3004646883']
+2 cuenta(s) de cargo encontradas
+--- Cuenta 1/2: Corriente Soles 200-3002926880 ---
+Cuenta seleccionada [0]: 'Corriente Soles 200-3002926880'
+Fecha inicio: '26/06/2026' ingresada (focus+TAB)
+Fecha fin: '26/06/2026' ingresada (focus+TAB)
+Busqueda ejecutada
+[DOM] 'post_busqueda_cuenta_1' guardado -> /app/logs/dom_IBK_F2_post_busqueda_cuenta_1_20260703_181210.html
+[p1] 1 fila(s) en tabla
+[p1] Fila 1/1 | Estado: 'Procesada'
+[p1] Procesando fila 1
+Detalle abierto (ibk-table-cell[9] lupa)
+[DOM] 'detalle_p1_f1' guardado -> /app/logs/dom_IBK_F2_detalle_p1_f1_20260703_181213.html
+Fecha autorizacion raw: '- 26/06/2026 | 07:05:55 P. M.'
+Monto extraido: 'S/ 14,667.95'
+Fecha: '- 26/06/2026 | 07:05:55 P. M.' | Monto: 'S/ 14,667.95'
+Click nativo en Descargar constancia
+URL antes=dbda57338351101a581f4a476d716580b675fcbcd1d48971bb7/51218299 | despues=dbda57338351101a581f4a476d716580b675fcbcd1d48971bb7/51218299
+[IBK-DIAG] 3 evento(s) capturados:
+[IBK-DIAG] URL.createObjectURL type=application/pdf url=blob:https://empresas.interbank.pe/fdd62511-6c54-4eab-9cf8-d
+[IBK-DIAG] XHR load url=https://apis.interbank.pe/bie/query/api/payment-bill/detail/ ct=application/pdf status=200
+[IBK-DIAG] XHR PDF capturado como blob: blob:https://empresas.interbank.pe/9cd8d7a1-ba96-473d-b470-a
+Blob URL capturada: blob:https://empresas.interbank.pe/9cd8d7a1-ba96-473d-b470-a493bbe6e9a8...
+PDF detectado en downloads: {'_constancia_ibk_temp.pdf', '38.44 IBK.pdf', '10,467.01 IBK.pdf', '10,003.80 IBK 2.pdf', '10,003.80 IBK.pdf', '457.56 IBK.pdf', '4,240.52 IBK 2.pdf', 'Servicios_Detalle_26062026.pdf', '4,240.52 IBK.pdf', '10,467.01 IBK 2.pdf'}
+PDF movido: Servicios_Detalle_26062026.pdf → 2026-06-26/14,667.95 IBK 2.pdf
+Regresado al historial (browser back)
+No hay mas paginas.
+Cuenta 'Corriente Soles 200-3002926880': 1 PDF(s) descargados
+--- Cuenta 2/2: Corriente Dólares 200-3004646883 ---
+Navegado a: https://empresas.interbank.pe/pagos-transferencias/servicios/historial/
+Cuenta seleccionada [1]: 'Corriente Dólares 200-3004646883'
+Fecha inicio: '26/06/2026' ingresada (focus+TAB)
+Fecha fin: '26/06/2026' ingresada (focus+TAB)
+Busqueda ejecutada
+[DOM] 'post_busqueda_cuenta_2' guardado -> /app/logs/dom_IBK_F2_post_busqueda_cuenta_2_20260703_181243.html
+Sin filas en pagina 1 para cuenta 'Corriente Dólares 200-3004646883'
+Cuenta 'Corriente Dólares 200-3004646883': 0 PDF(s) descargados
+Flujo IBK F2 finalizado: 1 PDF(s) descargados
+Flujo 2 finalizado: 1 archivo(s) descargados.
+=== FLUJO 1: Descarga de comprobantes masivos ===
+Iniciando DescargaComprobantes IBK | desde: 26/06/2026 hasta: 26/06/2026 | max: sin limite
+--- Procesando servicio: AHTC-01 - PROVEEDORES (soles) ---
