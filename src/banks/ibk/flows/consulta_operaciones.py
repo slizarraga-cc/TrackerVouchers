@@ -558,12 +558,27 @@ class ConsultaOperaciones(BaseFlow):
             self._guardar_dom("constancia_btn_no_encontrado")
             return False
 
-        # ── Esperar blob URL (hasta 15s) ──────────────────────────────────────
+        # ── Esperar blob URL o descarga HTTP directa (hasta 15s) ────────────────
+        # IBK puede usar blob (URL.createObjectURL) o descarga HTTP directa
+        # (Content-Disposition: attachment). Chrome maneja la segunda sin pasar
+        # por JS, por lo que __ibkPdfUrl queda null aunque el archivo ya este en disco.
+        pdfs_pre = {
+            f for f in os.listdir(self._downloads_path)
+            if f.lower().endswith('.pdf') and not f.endswith('.crdownload')
+        }
         pdf_url = None
         for _ in range(30):
             pdf_url = self.driver.execute_script("return window.__ibkPdfUrl;")
             if pdf_url:
                 break
+            # Detectar descarga HTTP directa
+            pdfs_ahora = {
+                f for f in os.listdir(self._downloads_path)
+                if f.lower().endswith('.pdf') and not f.endswith('.crdownload')
+            }
+            if pdfs_ahora - pdfs_pre:
+                logger.debug(f"Descarga HTTP directa detectada: {pdfs_ahora - pdfs_pre}")
+                return True
             self.esperar(0.5)
 
         if pdf_url:
