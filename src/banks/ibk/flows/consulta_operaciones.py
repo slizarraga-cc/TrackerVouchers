@@ -602,14 +602,38 @@ class ConsultaOperaciones(BaseFlow):
         """)
 
         # ── Click en el boton ─────────────────────────────────────────────────
+        # IBK usa Angular Zone.js: el handler puede estar en el <a>, en el hijo
+        # <ibk-icon> o en un ancestor. click_js() despacha un click sintetico JS
+        # que a veces no propaga correctamente. Intentamos 3 estrategias:
+        #   1. Click nativo Selenium sobre el <a> (genera mousedown+mouseup+click reales)
+        #   2. click_js sobre el <ibk-icon> hijo
+        #   3. click_js sobre el <a>
+        url_antes = self.driver.current_url
+        clicked = False
         try:
             el = self.esperar_elemento(S.BTN_DESCARGAR_CONSTANCIA, timeout=8)
-            self.click_js(el)
-            logger.debug("Click en Descargar constancia")
+            try:
+                el.click()   # click nativo Selenium
+                clicked = True
+                logger.debug("Click nativo en Descargar constancia")
+            except Exception as e_native:
+                logger.debug(f"Click nativo fallo ({e_native}), probando hijo ibk-icon...")
+                try:
+                    icon = el.find_element(By.CSS_SELECTOR, "ibk-icon")
+                    self.click_js(icon)
+                    clicked = True
+                    logger.debug("click_js en ibk-icon hijo")
+                except Exception:
+                    self.click_js(el)
+                    clicked = True
+                    logger.debug("click_js fallback en <a>")
         except Exception as e:
             logger.warning(f"No se encontro el boton Descargar constancia: {e}")
             self._guardar_dom("constancia_btn_no_encontrado")
             return False
+
+        url_despues = self.driver.current_url
+        logger.debug(f"URL antes={url_antes[-60:]} | despues={url_despues[-60:]}")
 
         # ── Esperar blob URL o descarga HTTP directa (hasta 15s) ────────────────
         # IBK puede usar blob (URL.createObjectURL) o descarga HTTP directa
