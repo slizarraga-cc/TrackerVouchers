@@ -516,36 +516,89 @@ class ConsultaOperaciones(BaseFlow):
         """
         # ── Inyectar interceptores ANTES del click ────────────────────────────
         self.driver.execute_script("""
-            window.__ibkPdfUrl = null;
+            window.__ibkPdfUrl  = null;
+            window.__ibkDiag    = [];   // log de eventos para depuracion
+
+            function _ibkLog(msg) { window.__ibkDiag.push(msg); }
 
             // Suprimir dialogo de impresion nativo
-            window.print = function() {};
+            window.print = function() { _ibkLog('window.print() llamado'); };
 
             // Capturar blob PDF al crearse
-            const _orig = URL.createObjectURL.bind(URL);
+            const _origCreate = URL.createObjectURL.bind(URL);
             URL.createObjectURL = function(blob) {
-                const url = _orig(blob);
+                const url = _origCreate(blob);
                 const t = ((blob && blob.type) || '').toLowerCase();
-                if (t.includes('pdf') || t.includes('octet-stream')) {
+                _ibkLog('URL.createObjectURL type=' + t + ' url=' + url.slice(0,60));
+                if (t.includes('pdf') || t.includes('octet-stream') || t.includes('application')) {
                     window.__ibkPdfUrl = url;
                 }
                 return url;
             };
 
-            // Capturar iframe.src (IBK puede asignar blob URL directamente al iframe)
+            // Capturar iframe.src
             const _d = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
             if (_d && _d.set) {
                 Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
                     set: function(v) {
+                        _ibkLog('iframe.src asignado: ' + String(v).slice(0,80));
                         _d.set.call(this, v);
-                        if (v && v.startsWith('blob:')) {
-                            window.__ibkPdfUrl = v;
-                        }
+                        if (v && v.startsWith('blob:')) window.__ibkPdfUrl = v;
                     },
                     get: _d.get,
                     configurable: true,
                 });
             }
+
+            // Capturar window.open (IBK podria abrir nueva ventana con el PDF)
+            const _origOpen = window.open.bind(window);
+            window.open = function(url, target, features) {
+                _ibkLog('window.open url=' + String(url).slice(0,80) + ' target=' + target);
+                if (url && (String(url).includes('pdf') || String(url).startsWith('blob:'))) {
+                    window.__ibkPdfUrl = url;
+                }
+                return _origOpen(url, target, features);
+            };
+
+            // Interceptar fetch para loguear respuestas PDF
+            const _origFetch = window.fetch.bind(window);
+            window.fetch = async function(...args) {
+                const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+                _ibkLog('fetch iniciado: ' + String(url).slice(0,80));
+                const resp = await _origFetch.apply(this, args);
+                const ct = (resp.headers.get('content-type') || '').toLowerCase();
+                _ibkLog('fetch respuesta ct=' + ct + ' status=' + resp.status + ' url=' + String(url).slice(0,60));
+                if (ct.includes('pdf') || ct.includes('octet-stream')) {
+                    const clone = resp.clone();
+                    const buf = await clone.arrayBuffer();
+                    const blob = new Blob([buf], {type: 'application/pdf'});
+                    const blobUrl = _origCreate(blob);
+                    _ibkLog('fetch PDF capturado como blob: ' + blobUrl.slice(0,60));
+                    window.__ibkPdfUrl = blobUrl;
+                }
+                return resp;
+            };
+
+            // Interceptar XHR para loguear respuestas PDF
+            const _origXhrOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this.__ibkUrl = url;
+                return _origXhrOpen.apply(this, arguments);
+            };
+            const _origXhrSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.send = function() {
+                this.addEventListener('load', function() {
+                    const ct = (this.getResponseHeader('content-type') || '').toLowerCase();
+                    _ibkLog('XHR load url=' + String(this.__ibkUrl).slice(0,60) + ' ct=' + ct + ' status=' + this.status);
+                    if (ct.includes('pdf') || ct.includes('octet-stream')) {
+                        const blob = new Blob([this.response], {type: 'application/pdf'});
+                        const blobUrl = _origCreate(blob);
+                        _ibkLog('XHR PDF capturado como blob: ' + blobUrl.slice(0,60));
+                        window.__ibkPdfUrl = blobUrl;
+                    }
+                });
+                return _origXhrSend.apply(this, arguments);
+            };
         """)
 
         # ── Click en el boton ─────────────────────────────────────────────────
@@ -581,6 +634,18 @@ class ConsultaOperaciones(BaseFlow):
                 return True
             self.esperar(0.5)
 
+        # Volcar log de diagnostico JS al logger de Python
+        try:
+            diag = self.driver.execute_script("return window.__ibkDiag || [];")
+            if diag:
+                logger.debug(f"[IBK-DIAG] {len(diag)} evento(s) capturados:")
+                for entry in diag:
+                    logger.debug(f"  [IBK-DIAG] {entry}")
+            else:
+                logger.debug("[IBK-DIAG] Sin eventos JS registrados tras el click")
+        except Exception as e:
+            logger.debug(f"[IBK-DIAG] No se pudo leer diagnostico: {e}")
+
         if pdf_url:
             logger.debug(f"Blob URL capturada: {pdf_url[:80]}...")
             # Disparar descarga via <a href=blob download>
@@ -609,7 +674,7 @@ class ConsultaOperaciones(BaseFlow):
             return False
 
         # ── Fallback: CDP Page.printToPDF ─────────────────────────────────────
-        logger.debug("Sin blob URL — fallback CDP Page.printToPDF sobre pagina de detalle")
+        logger.warning("Sin blob URL — fallback CDP Page.printToPDF sobre pagina de detalle")
         try:
             self.driver.execute_cdp_cmd("Emulation.setEmulatedMedia", {"media": "print"})
             self.esperar(1)
