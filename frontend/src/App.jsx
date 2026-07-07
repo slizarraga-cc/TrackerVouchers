@@ -9,7 +9,7 @@ import { CameraTest }      from './components/CameraTest'
 
 const MODULES = [
   // Bancos
-  { id: 'bcp',        label: 'BCP Soles',  icon: 'fa-building-columns', section: 'bancos',       component: BCPPanel },
+  { id: 'bcp',        label: 'BCP 1',      icon: 'fa-building-columns', section: 'bancos',       component: BCPPanel },
   { id: 'bcp2',       label: 'BCP 2',      icon: 'fa-building-columns', section: 'bancos',       component: BCP2Panel },
   { id: 'bbva',       label: 'BBVA',       icon: 'fa-building-columns', section: 'bancos',       component: BBVAPanel },
   { id: 'interbank',  label: 'Interbank',  icon: 'fa-building-columns', section: 'bancos',       component: IBKPanel },
