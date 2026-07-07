@@ -8,11 +8,21 @@ DOWNLOAD_DIR_CONTAINER = "/home/seluser/Downloads"
 DOWNLOAD_DIR_LOCAL = os.path.abspath("downloads")
 
 
-def get_driver(remote: bool = True, grid_url: str = None, use_camera: bool = False) -> webdriver.Remote:
+def get_driver(remote: bool = True, grid_url: str = None, use_camera: bool = False, download_subdir: str = "") -> webdriver.Remote:
+    if download_subdir:
+        container_dir = f"{DOWNLOAD_DIR_CONTAINER}/{download_subdir}"
+        local_dir = os.path.join(DOWNLOAD_DIR_LOCAL, download_subdir)
+    else:
+        container_dir = DOWNLOAD_DIR_CONTAINER
+        local_dir = DOWNLOAD_DIR_LOCAL
+
+    # Crear el directorio local (volumen montado compartido con el contenedor Selenium)
+    os.makedirs(local_dir, exist_ok=True)
+
     options = Options()
 
     prefs = {
-        "download.default_directory": DOWNLOAD_DIR_CONTAINER if remote else DOWNLOAD_DIR_LOCAL,
+        "download.default_directory": container_dir if remote else local_dir,
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
         "plugins.always_open_pdf_externally": True,
@@ -47,11 +57,9 @@ def get_driver(remote: bool = True, grid_url: str = None, use_camera: bool = Fal
             options=options,
         )
         logger.info(f"Driver remoto conectado a {url}")
-        download_dir = DOWNLOAD_DIR_CONTAINER
     else:
         driver = webdriver.Chrome(options=options)
         logger.info("Driver local iniciado")
-        download_dir = DOWNLOAD_DIR_LOCAL
 
     # Fuerza la timezone del navegador a Lima para que el banco no detecte UTC
     # y desplace las fechas (afecta Intl.DateTimeFormat y new Date() en el JS del banco)
@@ -62,9 +70,10 @@ def get_driver(remote: bool = True, grid_url: str = None, use_camera: bool = Fal
     # CDP garantiza la descarga automatica sin dialogo incluso en Grid remoto
     driver.execute_cdp_cmd("Page.setDownloadBehavior", {
         "behavior": "allow",
-        "downloadPath": download_dir,
+        "downloadPath": container_dir if remote else local_dir,
     })
-    logger.debug(f"Download dir configurado via CDP: {download_dir}")
+    active_dir = container_dir if remote else local_dir
+    logger.debug(f"Download dir configurado via CDP: {active_dir}")
 
     if use_camera:
         # Concede el permiso de cámara vía CDP para el origen IBK.

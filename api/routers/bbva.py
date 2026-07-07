@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from api.session_manager import session_manager, SessionStatus, Session
 
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/app/downloads')
+DOWNLOADS_PATH_BBVA = os.path.join(DOWNLOADS_PATH, 'bbva')
 SELENIUM_GRID_URL_BBVA = os.getenv('SELENIUM_GRID_URL_BBVA', 'http://selenium-bbva:4444')
 DEBUG_MODE = os.getenv('DEBUG', 'false').lower() == 'true'
 
@@ -29,24 +30,6 @@ def _session_sink(message):
 
 
 logger.add(_session_sink, format="{message}", level="DEBUG")
-
-
-def _renombrar_pdfs_nuevos(pdfs_previos: set) -> None:
-    try:
-        pdfs_actuales = {f for f in os.listdir(DOWNLOADS_PATH) if f.lower().endswith('.pdf')}
-        nuevos = pdfs_actuales - pdfs_previos
-        sufijo = '-BBVA.pdf'
-        for nombre in nuevos:
-            if '-BBVA.' not in nombre.upper():
-                base = nombre[:-4]
-                nuevo = f"{base}{sufijo}"
-                os.rename(
-                    os.path.join(DOWNLOADS_PATH, nombre),
-                    os.path.join(DOWNLOADS_PATH, nuevo),
-                )
-                logger.info(f"Renombrado: {nombre} -> {nuevo}")
-    except Exception as e:
-        logger.warning(f"No se pudo renombrar PDFs: {e}")
 
 
 LOGS_PATH = os.getenv('LOGS_PATH', '/app/logs')
@@ -112,7 +95,7 @@ def _run_libre(session: Session):
         from src.banks.bbva.selectors import BBVASelectors as S
 
         logger.info("Conectando al Selenium Grid BBVA (modo libre)...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BBVA)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BBVA, download_subdir='bbva')
         session.driver = driver
 
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
@@ -160,7 +143,7 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
         from src.banks.bbva.flows.consulta_operaciones import ConsultaOperaciones
 
         logger.info("Conectando al Selenium Grid...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BBVA)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BBVA, download_subdir='bbva')
         session.driver = driver
 
         # BBVA Net Cash usa Polymer/Web Components con shadow DOM cerrado por defecto.
@@ -211,7 +194,7 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
 
         # --- Flujo 1: Seguimiento de Pagos Masivos ---
         logger.info("=== FLUJO 1: Seguimiento de Pagos Masivos ===")
-        flow1 = SeguimientoPagosMasivos(driver, downloads_path=DOWNLOADS_PATH)
+        flow1 = SeguimientoPagosMasivos(driver, downloads_path=DOWNLOADS_PATH_BBVA)
         desc1 = flow1.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
         logger.success(f"Flujo 1 completado: {desc1} PDF(s)")
 
@@ -223,7 +206,7 @@ def _run_flow(session: Session, fecha: str, max_pdfs):
         # --- Flujo 2: Consulta de Operaciones ---
         logger.info("=== FLUJO 2: Consulta de Operaciones ===")
         driver.switch_to.default_content()
-        flow2 = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH)
+        flow2 = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH_BBVA)
         desc2 = flow2.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
         logger.success(f"Flujo 2 completado: {desc2} PDF(s)")
 

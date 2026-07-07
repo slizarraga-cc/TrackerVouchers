@@ -8,35 +8,9 @@ from loguru import logger
 from pydantic import BaseModel
 
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/app/downloads')
+DOWNLOADS_PATH_BCP1 = os.path.join(DOWNLOADS_PATH, 'bcp1')
 SELENIUM_GRID_URL_BCP = os.getenv('SELENIUM_GRID_URL_BCP', 'http://selenium-bcp:4444')
 LOGS_PATH = os.getenv('LOGS_PATH', '/app/logs')
-
-
-def _renombrar_pdfs_nuevos(pdfs_previos: set, banco: str) -> None:
-    """Renombra los PDFs nuevos agregando indice y sufijo del banco.
-    Resultado: '1.nombre BCP.pdf', '2.nombre BCP.pdf', ...
-    El orden del indice sigue el orden de descarga (fecha de modificacion).
-    """
-    try:
-        pdfs_actuales = {f for f in os.listdir(DOWNLOADS_PATH) if f.lower().endswith('.pdf')}
-        nuevos = pdfs_actuales - pdfs_previos
-        sufijo = f' {banco}.pdf'
-        # Ordenar por fecha de modificacion para respetar el orden de descarga
-        nuevos_ordenados = sorted(
-            nuevos,
-            key=lambda f: os.path.getmtime(os.path.join(DOWNLOADS_PATH, f))
-        )
-        for i, nombre in enumerate(nuevos_ordenados, start=1):
-            if not nombre.upper().endswith(f' {banco.upper()}.PDF') and not nombre.endswith(sufijo):
-                base = nombre[:-4]  # quitar .pdf
-                nuevo = f"{i}.{base}{sufijo}"
-                os.rename(
-                    os.path.join(DOWNLOADS_PATH, nombre),
-                    os.path.join(DOWNLOADS_PATH, nuevo),
-                )
-                logger.info(f"Renombrado: {nombre} -> {nuevo}")
-    except Exception as e:
-        logger.warning(f"No se pudo renombrar PDFs: {e}")
 
 from api.session_manager import session_manager, SessionStatus, Session
 
@@ -128,7 +102,7 @@ def _run_libre(session: Session):
         from src.banks.bcp.selectors import BCPSelectors as S
 
         logger.info("Conectando al Selenium Grid (modo libre)...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP, download_subdir='bcp1')
         session.driver = driver
 
         logger.info("Navegando al portal BCP...")
@@ -167,18 +141,11 @@ def _run_flow(session: Session, fecha: str, max_pdfs: int):
         from src.banks.bcp.flows.descarga_comprobantes import DescargaComprobantes
 
         logger.info("Conectando al Selenium Grid...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP, download_subdir='bcp1')
         session.driver = driver
 
         logger.info("Navegando a la pagina de login BCP...")
         driver.get(S.LOGIN_URL)
-
-        # Registrar PDFs existentes antes del flujo para detectar los nuevos al final
-        pdfs_previos: set = set()
-        try:
-            pdfs_previos = {f for f in os.listdir(DOWNLOADS_PATH) if f.lower().endswith('.pdf')}
-        except Exception:
-            pass
 
         session.status = SessionStatus.ESPERANDO_LOGIN
         logger.info(
@@ -209,7 +176,7 @@ def _run_flow(session: Session, fecha: str, max_pdfs: int):
         session.status = SessionStatus.EJECUTANDO
         logger.info("Login confirmado. Iniciando descarga de comprobantes...")
 
-        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH, logs_path=LOGS_PATH)
+        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH_BCP1, logs_path=LOGS_PATH)
         descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
 
         session.resultado = descargados

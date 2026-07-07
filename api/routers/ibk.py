@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from api.session_manager import session_manager, SessionStatus, Session
 
 DOWNLOADS_PATH        = os.getenv('DOWNLOADS_PATH', '/app/downloads')
+DOWNLOADS_PATH_IBK    = os.path.join(DOWNLOADS_PATH, 'ibk')
 SELENIUM_GRID_URL_IBK = os.getenv('SELENIUM_GRID_URL_IBK', 'http://selenium-ibk:4444')
 LOGS_PATH             = os.getenv('LOGS_PATH', '/app/logs')
 DEBUG_MODE            = os.getenv('DEBUG', 'false').lower() == 'true'
@@ -192,7 +193,7 @@ def _run_libre(session: Session):
         from src.core.driver import get_driver
 
         logger.info("Conectando al Selenium Grid IBK (modo libre)...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_IBK, use_camera=True)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_IBK, use_camera=True, download_subdir='ibk')
         session.driver = driver
 
         logger.info("Navegando al portal Interbank Empresas...")
@@ -228,7 +229,7 @@ def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
         from src.banks.ibk.flows.descarga_comprobantes import DescargaComprobantes
 
         logger.info("Conectando al Selenium Grid IBK...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_IBK, use_camera=True)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_IBK, use_camera=True, download_subdir='ibk')
         session.driver = driver
 
         # Inyectar override de getUserMedia en cada nueva página que cargue Chrome
@@ -283,14 +284,14 @@ def _run_flow(session: Session, fecha_inicio: str, fecha_fin: str, max_pdfs):
 
         # --- Flujo 2: Historial de pago de servicios (por cuenta de cargo) ---
         logger.info("=== FLUJO 2: Historial de pago de servicios ===")
-        flow2 = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH)
+        flow2 = ConsultaOperaciones(driver, downloads_path=DOWNLOADS_PATH_IBK)
         descargados_f2 = flow2.ejecutar(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, max_pdfs=max_pdfs)
         logger.success(f"Flujo 2 finalizado: {descargados_f2} archivo(s) descargados.")
 
         # --- Flujo 1: Descarga de comprobantes masivos (pagos masivos historial) ---
         logger.info("=== FLUJO 1: Descarga de comprobantes masivos ===")
         restante_f1 = (max_pdfs - descargados_f2) if max_pdfs is not None else None
-        flow1 = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH)
+        flow1 = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH_IBK)
         descargados_f1 = flow1.ejecutar(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, max_pdfs=restante_f1)
         logger.success(f"Flujo 1 finalizado: {descargados_f1} archivo(s) descargados.")
 

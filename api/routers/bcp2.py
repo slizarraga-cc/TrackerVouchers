@@ -8,6 +8,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/app/downloads')
+DOWNLOADS_PATH_BCP2 = os.path.join(DOWNLOADS_PATH, 'bcp2')
 SELENIUM_GRID_URL_BCP2 = os.getenv('SELENIUM_GRID_URL_BCP2', 'http://selenium-bcp2:4444')
 LOGS_PATH = os.getenv('LOGS_PATH', '/app/logs')
 
@@ -70,7 +71,7 @@ def _run_libre(session: Session):
         from src.banks.bcp.selectors import BCPSelectors as S
 
         logger.info("Conectando al Selenium Grid BCP2 (modo libre)...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP2)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP2, download_subdir='bcp2')
         session.driver = driver
 
         logger.info("Navegando al portal BCP2...")
@@ -109,7 +110,7 @@ def _run_flow(session: Session, fecha: str, max_pdfs: int):
         from src.banks.bcp.flows.descarga_comprobantes import DescargaComprobantes
 
         logger.info("Conectando al Selenium Grid BCP2...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP2)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_BCP2, download_subdir='bcp2')
         session.driver = driver
 
         logger.info("Navegando a la pagina de login BCP2...")
@@ -144,7 +145,7 @@ def _run_flow(session: Session, fecha: str, max_pdfs: int):
         session.status = SessionStatus.EJECUTANDO
         logger.info("Login confirmado. Iniciando descarga de comprobantes BCP2...")
 
-        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH, logs_path=LOGS_PATH)
+        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH_BCP2, logs_path=LOGS_PATH)
         descargados = flow.ejecutar(fecha=fecha, max_pdfs=max_pdfs)
 
         session.resultado = descargados

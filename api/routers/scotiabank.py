@@ -10,9 +10,10 @@ from pydantic import BaseModel
 
 from api.session_manager import session_manager, SessionStatus, Session
 
-DOWNLOADS_PATH             = os.getenv('DOWNLOADS_PATH', '/app/downloads')
+DOWNLOADS_PATH               = os.getenv('DOWNLOADS_PATH', '/app/downloads')
+DOWNLOADS_PATH_SCOTIABANK    = os.path.join(DOWNLOADS_PATH, 'scotiabank')
 SELENIUM_GRID_URL_SCOTIABANK = os.getenv('SELENIUM_GRID_URL_SCOTIABANK', 'http://selenium-scotiabank:4444')
-LOGS_PATH                  = os.getenv('LOGS_PATH', '/app/logs')
+LOGS_PATH                    = os.getenv('LOGS_PATH', '/app/logs')
 DEBUG_MODE                 = os.getenv('DEBUG', 'false').lower() == 'true'
 
 router = APIRouter()
@@ -70,7 +71,7 @@ def _run_libre(session: Session):
         from src.banks.scotiabank.selectors import ScotiabankSelectors as S
 
         logger.info("Conectando al Selenium Grid Scotiabank (modo libre)...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_SCOTIABANK)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_SCOTIABANK, download_subdir='scotiabank')
         session.driver = driver
 
         logger.info("Navegando al portal Scotiabank Empresas...")
@@ -105,7 +106,7 @@ def _run_flow(session: Session, fecha_desde: str, fecha_hasta: str, max_pdfs: in
         from src.banks.scotiabank.selectors import ScotiabankSelectors as S
 
         logger.info("Conectando al Selenium Grid Scotiabank...")
-        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_SCOTIABANK)
+        driver = get_driver(remote=True, grid_url=SELENIUM_GRID_URL_SCOTIABANK, download_subdir='scotiabank')
         session.driver = driver
 
         logger.info("Navegando al portal Scotiabank Empresas...")
@@ -139,7 +140,7 @@ def _run_flow(session: Session, fecha_desde: str, fecha_hasta: str, max_pdfs: in
         session.status = SessionStatus.EJECUTANDO
         logger.info(f"Login confirmado. Iniciando descarga de comprobantes Scotiabank ({fecha_desde} → {fecha_hasta})...")
 
-        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH)
+        flow = DescargaComprobantes(driver, downloads_path=DOWNLOADS_PATH_SCOTIABANK)
         descargados = flow.ejecutar(fecha_desde=fecha_desde, fecha_hasta=fecha_hasta, max_pdfs=max_pdfs)
 
         session.resultado = descargados

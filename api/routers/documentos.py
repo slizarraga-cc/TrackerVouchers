@@ -12,15 +12,25 @@ router = APIRouter()
 
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/app/downloads')
 
-BANK_SUFFIXES = ['BCP', 'BBVA', 'SCOTIABANK', 'INTERBANK', 'IBK']
-
 _LIMA = timezone(timedelta(hours=-5))
 _DATE_FOLDER_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+# Mapeo de subdirectorio → etiqueta de banco
+_BANK_DIR_MAP = {
+    'bcp1':       'BCP1',
+    'bcp2':       'BCP2',
+    'bbva':       'BBVA',
+    'ibk':        'IBK',
+    'scotiabank': 'SCOTIABANK',
+}
+
+# Fallback: detectar banco por sufijo en el nombre del archivo (archivos legacy en raíz)
+_BANK_SUFFIXES = ['BCP', 'BBVA', 'SCOTIABANK', 'INTERBANK', 'IBK']
 
 
 def _detectar_banco(filename: str) -> str:
     upper = filename.upper()
-    for banco in BANK_SUFFIXES:
+    for banco in _BANK_SUFFIXES:
         if f' {banco}.' in upper or f'-{banco}.' in upper or f' {banco} ' in upper:
             return banco
     return 'OTRO'
@@ -38,14 +48,29 @@ def _safe_path(ruta: str) -> str:
 
 
 def _listar_pdfs() -> list[dict]:
-    """Lista todos los PDFs recursivamente, incluyendo subcarpetas de fecha."""
+    """Lista todos los PDFs recursivamente, incluyendo subcarpetas de banco y fecha.
+
+    Estructura esperada:
+      downloads/
+        bcp1/YYYY-MM-DD/archivo.pdf   → banco=BCP1, fecha=YYYY-MM-DD
+        bcp2/YYYY-MM-DD/archivo.pdf   → banco=BCP2, fecha=YYYY-MM-DD
+        bbva/YYYY-MM-DD/archivo.pdf   → banco=BBVA, fecha=YYYY-MM-DD
+        ibk/archivo.pdf               → banco=IBK,  fecha=mtime
+        scotiabank/archivo.pdf        → banco=SCOTIABANK, fecha=mtime
+        archivo_legacy.pdf            → banco=detectado por sufijo, fecha=mtime
+    """
     archivos = []
     try:
         for dirpath, dirnames, filenames in os.walk(DOWNLOADS_PATH):
             dirnames.sort()
             rel_dir = os.path.relpath(dirpath, DOWNLOADS_PATH)
-            # Usar el nombre de la carpeta como fecha si coincide con YYYY-MM-DD
-            folder_fecha = rel_dir if _DATE_FOLDER_RE.match(rel_dir) else None
+            parts = rel_dir.split(os.sep) if rel_dir != '.' else []
+
+            # Banco: primer componente del path si está en el mapa de subdirectorios
+            banco_dir = _BANK_DIR_MAP.get(parts[0]) if parts else None
+
+            # Fecha: último componente del path si tiene formato YYYY-MM-DD
+            folder_fecha = parts[-1] if parts and _DATE_FOLDER_RE.match(parts[-1]) else None
 
             for nombre in sorted(filenames):
                 if not nombre.lower().endswith('.pdf'):
@@ -54,10 +79,11 @@ def _listar_pdfs() -> list[dict]:
                 stat = os.stat(full_path)
                 ruta = nombre if rel_dir == '.' else f'{rel_dir}/{nombre}'
                 fecha = folder_fecha if folder_fecha else _mtime_a_fecha(stat.st_mtime)
+                banco = banco_dir if banco_dir else _detectar_banco(nombre)
                 archivos.append({
                     'nombre':     nombre,
                     'ruta':       ruta,
-                    'banco':      _detectar_banco(nombre),
+                    'banco':      banco,
                     'size':       stat.st_size,
                     'modificado': stat.st_mtime,
                     'fecha':      fecha,
