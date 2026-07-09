@@ -7,18 +7,24 @@ import {
 } from '../api/client'
 
 const BANK_LABELS = {
+  BCP1:       'BCP 1',
+  BCP2:       'BCP 2',
   BCP:        'BCP Telecredito',
   BBVA:       'BBVA Net Cash',
   SCOTIABANK: 'Scotiabank',
   INTERBANK:  'Interbank',
+  IBK:        'Interbank',
   OTRO:       'Sin banco asignado',
 }
 
 const BANK_ICONS = {
+  BCP1:       'fa-building-columns',
+  BCP2:       'fa-building-columns',
   BCP:        'fa-building-columns',
   BBVA:       'fa-university',
   SCOTIABANK: 'fa-credit-card',
   INTERBANK:  'fa-landmark',
+  IBK:        'fa-landmark',
   OTRO:       'fa-file-pdf',
 }
 

@@ -9,15 +9,17 @@ DOWNLOAD_DIR_LOCAL = os.path.abspath("downloads")
 
 
 def get_driver(remote: bool = True, grid_url: str = None, use_camera: bool = False, download_subdir: str = "") -> webdriver.Remote:
-    if download_subdir:
-        container_dir = f"{DOWNLOAD_DIR_CONTAINER}/{download_subdir}"
-        local_dir = os.path.join(DOWNLOAD_DIR_LOCAL, download_subdir)
-    else:
+    # En modo remoto, Chrome descarga a la ruta estándar del contenedor.
+    # El aislamiento por banco se logra mediante volúmenes Docker separados por banco
+    # (cada contenedor Selenium tiene su propio volumen montado en /home/seluser/Downloads).
+    # En modo local, se usa un subdirectorio para aislar las descargas por banco.
+    if remote:
         container_dir = DOWNLOAD_DIR_CONTAINER
         local_dir = DOWNLOAD_DIR_LOCAL
-
-    # Crear el directorio local (volumen montado compartido con el contenedor Selenium)
-    os.makedirs(local_dir, exist_ok=True)
+    else:
+        local_dir = os.path.join(DOWNLOAD_DIR_LOCAL, download_subdir) if download_subdir else DOWNLOAD_DIR_LOCAL
+        os.makedirs(local_dir, exist_ok=True)
+        container_dir = local_dir  # no usado en modo local
 
     options = Options()
 
@@ -72,8 +74,7 @@ def get_driver(remote: bool = True, grid_url: str = None, use_camera: bool = Fal
         "behavior": "allow",
         "downloadPath": container_dir if remote else local_dir,
     })
-    active_dir = container_dir if remote else local_dir
-    logger.debug(f"Download dir configurado via CDP: {active_dir}")
+    logger.debug(f"Download dir configurado via CDP: {container_dir if remote else local_dir}")
 
     if use_camera:
         # Concede el permiso de cámara vía CDP para el origen IBK.

@@ -16,8 +16,6 @@ x-selenium-common: &selenium-common
     # y el servidor X11, que causaba que Caps Lock y Shift se comportaran de forma
     # impredecible. Para mayusculas usar Shift (funciona siempre en noVNC).
     SE_SCREEN_KEYBOARD_OPTIONS: "caps:none"
-  volumes:
-    - downloads:/home/seluser/Downloads
   restart: unless-stopped
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
@@ -31,25 +29,41 @@ services:
     <<: *selenium-common
     container_name: rpa_chrome_bcp
     ports:
-      - "7901:7900"   # noVNC BCP
+      - "7901:7900"   # noVNC BCP 1
+    volumes:
+      - downloads_bcp1:/home/seluser/Downloads
+
+  selenium-bcp2:
+    <<: *selenium-common
+    container_name: rpa_chrome_bcp2
+    ports:
+      - "7905:7900"   # noVNC BCP 2
+    volumes:
+      - downloads_bcp2:/home/seluser/Downloads
 
   selenium-bbva:
     <<: *selenium-common
     container_name: rpa_chrome_bbva
     ports:
       - "7902:7900"   # noVNC BBVA
+    volumes:
+      - downloads_bbva:/home/seluser/Downloads
 
   selenium-ibk:
     <<: *selenium-common
     container_name: rpa_chrome_ibk
     ports:
       - "7903:7900"   # noVNC IBK
+    volumes:
+      - downloads_ibk:/home/seluser/Downloads
 
   selenium-scotiabank:
     <<: *selenium-common
     container_name: rpa_chrome_scotiabank
     ports:
       - "7904:7900"   # noVNC Scotiabank
+    volumes:
+      - downloads_scotiabank:/home/seluser/Downloads
 
   api:
     build:
@@ -62,14 +76,21 @@ services:
     environment:
       TZ: "America/Lima"
       SELENIUM_GRID_URL_BCP:        http://selenium-bcp:4444
+      SELENIUM_GRID_URL_BCP2:       http://selenium-bcp2:4444
       SELENIUM_GRID_URL_BBVA:       http://selenium-bbva:4444
       SELENIUM_GRID_URL_IBK:        http://selenium-ibk:4444
       SELENIUM_GRID_URL_SCOTIABANK: http://selenium-scotiabank:4444
     volumes:
-      - downloads:/app/downloads
+      - downloads_bcp1:/app/downloads/bcp1
+      - downloads_bcp2:/app/downloads/bcp2
+      - downloads_bbva:/app/downloads/bbva
+      - downloads_ibk:/app/downloads/ibk
+      - downloads_scotiabank:/app/downloads/scotiabank
     restart: unless-stopped
     depends_on:
       selenium-bcp:
+        condition: service_healthy
+      selenium-bcp2:
         condition: service_healthy
       selenium-bbva:
         condition: service_healthy
@@ -92,4 +113,8 @@ services:
       - api
 
 volumes:
-  downloads:
+  downloads_bcp1:
+  downloads_bcp2:
+  downloads_bbva:
+  downloads_ibk:
+  downloads_scotiabank:
